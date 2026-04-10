@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	Env      string   `yaml:"env" env-default:"local"`
-	GRPC     GRPC     `yaml:"grpc"`
-	Database Database `yaml:"database"`
+	Env             string          `yaml:"env" env-default:"local"`
+	GRPC            GRPC            `yaml:"grpc"`
+	Database        Database        `yaml:"database"`
+	ResourceService ResourceService `yaml:"resource_service"`
 }
 
 type GRPC struct {
@@ -25,6 +26,10 @@ type Database struct {
 	Password string `yaml:"password"`
 	Name     string `yaml:"name"`
 	SSLMode  string `yaml:"ssl_mode" env-default:"disable"`
+}
+
+type ResourceService struct {
+	Address string `yaml:"address" env-default:"localhost:60008"`
 }
 
 func MustLoad() *Config {

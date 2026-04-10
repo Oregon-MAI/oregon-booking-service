@@ -1,0 +1,191 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/models"
+	"github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
+)
+
+const (
+	resourceTypeMeetingRoom = "meeting_room"
+	resourceTypeWorkspace   = "workspace"
+	resourceStatusAvailable = "available"
+	bookingGap              = 15 * time.Minute
+)
+
+type Resource struct {
+	ID       string
+	Name     string
+	Type     string
+	Location string
+	Status   string
+}
+
+type Repository interface {
+	CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error)
+	GetBooking(ctx context.Context, bookingID string) (*models.Booking, error)
+	UserCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
+	AdminCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
+	ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error)
+	ListBookingsByResource(ctx context.Context, resourceID string, from time.Time, to time.Time) ([]*models.Booking, error)
+	HasBookingConflict(ctx context.Context, resourceID string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error)
+}
+
+type ResourceClient interface {
+	GetResource(ctx context.Context, resourceID string) (*Resource, error)
+}
+
+type Service struct {
+	log            *slog.Logger
+	repo           Repository
+	resourceClient ResourceClient
+}
+
+func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+
+	return &Service{
+		log:            log,
+		repo:           repo,
+		resourceClient: resourceClient,
+	}
+}
+
+func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingRequest) (*models.Booking, error) {
+	const op = "Service.CreateBooking"
+
+	if in.StartsAt.IsZero() || in.EndsAt.IsZero() || !in.StartsAt.Before(in.EndsAt) {
+		return nil, fmt.Errorf("%s: invalid booking time range", op)
+	}
+
+	if s.resourceClient == nil {
+		return nil, fmt.Errorf("%s: resource client is not configured", op)
+	}
+
+	resource, err := s.resourceClient.GetResource(ctx, in.ResourceID)
+	if err != nil {
+		s.log.Error("get resource failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	if !strings.EqualFold(resource.Status, resourceStatusAvailable) {
+		return nil, fmt.Errorf("%s: resource is not available", op)
+	}
+
+	if requiresConflictCheck(resource.Type) {
+		conflict, err := s.repo.HasBookingConflict(ctx, in.ResourceID, in.StartsAt, in.EndsAt, bookingGap)
+		if err != nil {
+			s.log.Error("conflict check failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
+			return nil, fmt.Errorf("%s: %w", op, err)
+		}
+		if conflict {
+			return nil, fmt.Errorf("%s: booking time conflicts with existing bookings", op)
+		}
+	}
+
+	b := &models.Booking{
+		ResourceID: in.ResourceID,
+		UserID:     in.UserID,
+		ResourceName:     resource.Name,
+		ResourceType:     resource.Type,
+		ResourceLocation: resource.Location,
+		StartsAt:   in.StartsAt,
+		EndsAt:     in.EndsAt,
+		Status:     models.BookingStatusConfirmed,
+	}
+
+	created, err := s.repo.CreateBooking(ctx, b)
+	if err != nil {
+		s.log.Error("create booking failed",
+			slog.String("resource_id", in.ResourceID),
+			slog.String("user_id", in.UserID),
+			slog.Any("error", err),
+		)
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	s.log.Info("booking created",
+		slog.String("booking_id", created.BookingID),
+		slog.String("resource_id", created.ResourceID),
+		slog.String("user_id", created.UserID),
+	)
+
+	return created, nil
+}
+
+func (s *Service) GetBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
+	const op = "Service.GetBooking"
+
+	b, err := s.repo.GetBooking(ctx, bookingID)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return b, nil
+}
+
+func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
+	const op = "Service.UserCancelBooking"
+
+	b, err := s.repo.UserCancelBooking(ctx, bookingID)
+	if err != nil {
+		s.log.Error("user cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	s.log.Info("booking canceled by user", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+
+	return b, nil
+}
+
+func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
+	const op = "Service.AdminCancelBooking"
+
+	b, err := s.repo.AdminCancelBooking(ctx, bookingID)
+	if err != nil {
+		s.log.Error("admin cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	s.log.Info("booking canceled by admin", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+
+	return b, nil
+}
+
+func (s *Service) ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error) {
+	const op = "Service.ListBookingsByUser"
+
+	bookings, err := s.repo.ListBookingsByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return bookings, nil
+}
+
+func (s *Service) ListBookingsByResource(ctx context.Context, in booking.ListBookingsByResourceRequest) ([]*models.Booking, error) {
+	const op = "Service.ListBookingsByResource"
+
+	if in.From.IsZero() || in.To.IsZero() || !in.From.Before(in.To) {
+		return nil, fmt.Errorf("%s: invalid time range", op)
+	}
+
+	bookings, err := s.repo.ListBookingsByResource(ctx, in.ResourceID, in.From, in.To)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return bookings, nil
+}
+
+func requiresConflictCheck(resourceType string) bool {
+	resourceType = strings.ToLower(resourceType)
+	return resourceType == resourceTypeMeetingRoom || resourceType == resourceTypeWorkspace
+}

@@ -3,6 +3,9 @@ env: "local"
 grpc:
   port: 60017
 
+resource_service:
+  address: "localhost:60008"
+
 
 database:
   host: "postgres"
