@@ -1,0 +1,80 @@
+services:
+  booking-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: booking_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5438:5432"
+    volumes:
+      - booking_pgdata:/var/lib/postgresql/data
+      - ./migrations/0001_bookings.sql:/docker-entrypoint-initdb.d/0001_bookings.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d booking_service"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: resource_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - resource_pgdata:/var/lib/postgresql/data
+      - ./migrations/0001_resources.sql:/docker-entrypoint-initdb.d/0001_resources.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resource_service"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  resource-service:
+    image: acyushka/oregon-resource-service:latest
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: resource_service
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: resource_service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "60008:60008"
+      - "60009:60009"
+    restart: unless-stopped
+
+  booking-service:
+    image: acyushka/oregon-booking-service:latest
+    environment:
+      DB_HOST: booking-postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: booking_service
+      RESOURCE_SERVICE_ADDRESS: resource-service:60008
+      GRPC_PORT: "60017"
+    depends_on:
+      booking-postgres:
+        condition: service_healthy
+      resource-service:
+        condition: service_started
+    ports:
+      - "60017:60017"
+    restart: unless-stopped
+
+volumes:
+  booking_pgdata:
+  resource_pgdata:
+
+

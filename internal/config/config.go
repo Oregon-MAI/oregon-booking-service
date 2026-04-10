@@ -16,20 +16,20 @@ type Config struct {
 }
 
 type GRPC struct {
-	Port int `yaml:"port"`
+	Port int `yaml:"port" env:"GRPC_PORT" env-default:"60017"`
 }
 
 type Database struct {
-	Host     string `yaml:"host"`
-	Port     string `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Name     string `yaml:"name"`
+	Host     string `yaml:"host" env:"DB_HOST" env-default:"localhost"`
+	Port     string `yaml:"port" env:"DB_PORT" env-default:"5432"`
+	User     string `yaml:"user" env:"DB_USER" env-default:"postgres"`
+	Password string `yaml:"password" env:"DB_PASSWORD" env-default:"postgres"`
+	Name     string `yaml:"name" env:"DB_NAME" env-default:"booking_service"`
 	SSLMode  string `yaml:"ssl_mode" env-default:"disable"`
 }
 
 type ResourceService struct {
-	Address string `yaml:"address" env-default:"localhost:60008"`
+	Address string `yaml:"address" env:"RESOURCE_SERVICE_ADDRESS" env-default:"localhost:60008"`
 }
 
 func MustLoad() *Config {

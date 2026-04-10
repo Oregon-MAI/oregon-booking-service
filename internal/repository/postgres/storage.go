@@ -1,4 +1,4 @@
- package postgres
+package postgres
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	dbStatusConfirmed = "confirmed"
-	dbStatusCanceled  = "canceled"
+	dbStatusConfirmed       = "confirmed"
+	dbStatusCanceled        = "canceled"
 	resourceTypeMeetingRoom = "meeting_room"
 	resourceTypeWorkspace   = "workspace"
 )
@@ -400,5 +400,3 @@ func nullableString(v string) any {
 
 	return v
 }
-
-

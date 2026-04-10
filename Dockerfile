@@ -1,16 +1,21 @@
 FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache ca-certificates git
+WORKDIR /app
 
-WORKDIR /src
-
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o main ./cmd/summator/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /booking-service ./cmd/booking
 
-FROM golang:1.26-alpine
+FROM alpine:3.20
 
-COPY --from=builder /src/main /test/main
-ENTRYPOINT [ "/test/main" ]
+WORKDIR /app
+
+COPY --from=builder /booking-service /usr/local/bin/booking-service
+COPY config/local.yml /app/config/local.yml
+
+EXPOSE 60017
+
+ENTRYPOINT ["booking-service"]
+CMD ["-config", "/app/config/local.yml"]
