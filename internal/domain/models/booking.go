@@ -12,14 +12,14 @@ type Booking struct {
 	StartsAt         time.Time     `json:"start_time"`
 	EndsAt           time.Time     `json:"end_time"`
 	Status           BookingStatus `json:"status"`
-	CancelReason string    `json:"cancel_reason"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	CancelReason     string        `json:"cancel_reason"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
 type BookingStatus string
 
 const (
-	BookingStatusConfirmed  BookingStatus = "CONFIRMED"
-	BookingStatusCanceled   BookingStatus = "CANCELED"
+	BookingStatusConfirmed BookingStatus = "CONFIRMED"
+	BookingStatusCanceled  BookingStatus = "CANCELED"
 )

@@ -29,11 +29,10 @@ type Resource struct {
 type Repository interface {
 	CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error)
 	GetBooking(ctx context.Context, bookingID string) (*models.Booking, error)
-	UserCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
-	AdminCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
+	CancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
 	ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error)
 	ListBookingsByResource(ctx context.Context, resourceID string, from time.Time, to time.Time) ([]*models.Booking, error)
-	HasBookingConflict(ctx context.Context, resourceID string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error)
+	HasBookingConflict(ctx context.Context, userID string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error)
 }
 
 type ResourceClient interface {
@@ -80,7 +79,7 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 	}
 
 	if requiresConflictCheck(resource.Type) {
-		conflict, err := s.repo.HasBookingConflict(ctx, in.ResourceID, in.StartsAt, in.EndsAt, bookingGap)
+		conflict, err := s.repo.HasBookingConflict(ctx, in.UserID, in.StartsAt, in.EndsAt, bookingGap)
 		if err != nil {
 			s.log.Error("conflict check failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
 			return nil, fmt.Errorf("%s: %w", op, err)
@@ -91,14 +90,14 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 	}
 
 	b := &models.Booking{
-		ResourceID: in.ResourceID,
-		UserID:     in.UserID,
+		ResourceID:       in.ResourceID,
+		UserID:           in.UserID,
 		ResourceName:     resource.Name,
 		ResourceType:     resource.Type,
 		ResourceLocation: resource.Location,
-		StartsAt:   in.StartsAt,
-		EndsAt:     in.EndsAt,
-		Status:     models.BookingStatusConfirmed,
+		StartsAt:         in.StartsAt,
+		EndsAt:           in.EndsAt,
+		Status:           models.BookingStatusConfirmed,
 	}
 
 	created, err := s.repo.CreateBooking(ctx, b)
@@ -134,7 +133,7 @@ func (s *Service) GetBooking(ctx context.Context, bookingID string) (*models.Boo
 func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.UserCancelBooking"
 
-	b, err := s.repo.UserCancelBooking(ctx, bookingID)
+	b, err := s.repo.CancelBooking(ctx, bookingID)
 	if err != nil {
 		s.log.Error("user cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -148,7 +147,7 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.AdminCancelBooking"
 
-	b, err := s.repo.AdminCancelBooking(ctx, bookingID)
+	b, err := s.repo.CancelBooking(ctx, bookingID)
 	if err != nil {
 		s.log.Error("admin cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
 		return nil, fmt.Errorf("%s: %w", op, err)
