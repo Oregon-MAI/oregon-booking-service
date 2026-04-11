@@ -167,7 +167,11 @@ func (r *Repository) ListBookingsByUser(ctx context.Context, userID string) ([]*
 	if err != nil {
 		return nil, fmt.Errorf("%s: query bookings: %w", op, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			r.log.Error("rows close failed", slog.String("op", op), slog.Any("error", closeErr))
+		}
+	}()
 
 	bookings, err := scanBookingRows(rows)
 	if err != nil {
@@ -203,7 +207,11 @@ func (r *Repository) ListBookingsByResource(ctx context.Context, resourceID stri
 	if err != nil {
 		return nil, fmt.Errorf("%s: query bookings: %w", op, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			r.log.Error("rows close failed", slog.String("op", op), slog.Any("error", closeErr))
+		}
+	}()
 
 	bookings, err := scanBookingRows(rows)
 	if err != nil {

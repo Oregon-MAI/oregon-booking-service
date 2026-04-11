@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -38,7 +39,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 
 	resourceClient, err := resourcegrpc.NewClient(cfg.ResourceService.Address)
 	if err != nil {
-		_ = repo.Close()
+		if closeErr := repo.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%s: init resource client: %w; close repository: %v", op, err, closeErr)
+		}
+
 		return nil, fmt.Errorf("%s: init resource client: %w", op, err)
 	}
 
@@ -59,7 +63,7 @@ func (a *App) MustRun() {
 
 func (a *App) Run() error {
 	if a == nil || a.GRPC == nil {
-		return fmt.Errorf("app.Run: app is not initialized")
+		return errors.New("app.Run: app is not initialized")
 	}
 
 	a.log.Info("starting grpc app")
@@ -103,4 +107,3 @@ func makeDSN(cfg config.Database) string {
 		cfg.SSLMode,
 	)
 }
-
