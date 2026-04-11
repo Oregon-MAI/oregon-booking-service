@@ -6,6 +6,16 @@ grpc:
 resource_service:
   address: "localhost:60008"
 
+kafka:
+  enabled: false
+  brokers:
+    - "localhost:9092"
+  client_id: "oregon-booking-service"
+  topics:
+    user_booking: "topic.user.booking"
+    admin_cancel: "topic.admin.cancel"
+    user_cancel: "topic.user.cancel"
+
 
 database:
   host: "postgres"

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	grpcapp "github.com/Oregon-MAI/oregon-booking-service/internal/app/grpc"
+	kafkaproducer "github.com/Oregon-MAI/oregon-booking-service/internal/brokers/kafka"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/config"
 	resourcegrpc "github.com/Oregon-MAI/oregon-booking-service/internal/grpc/resource"
 	repository "github.com/Oregon-MAI/oregon-booking-service/internal/repository/postgres"
@@ -17,6 +18,7 @@ type App struct {
 	GRPC           *grpcapp.App
 	repo           *repository.Repository
 	resourceClient *resourcegrpc.Client
+	producer       *kafkaproducer.Producer
 	log            *slog.Logger
 }
 
@@ -40,21 +42,57 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	resourceClient, err := resourcegrpc.NewClient(cfg.ResourceService.Address)
 	if err != nil {
 		if closeErr := repo.Close(); closeErr != nil {
-			return nil, fmt.Errorf("%s: init resource client: %w; close repository: %v", op, err, closeErr)
+			log.Error("failed to close repository", slog.Any("error", closeErr))
 		}
-
 		return nil, fmt.Errorf("%s: init resource client: %w", op, err)
 	}
 
-	bookingService := service.NewService(log, repo, resourceClient)
+	producer, err := initProducer(ctx, cfg, log, repo, resourceClient, op)
+	if err != nil {
+		return nil, err
+	}
+
+	bookingService := service.NewService(log, repo, resourceClient, producer, service.EventTopics{
+		UserBooking: cfg.Kafka.Topics.UserBooking,
+		AdminCancel: cfg.Kafka.Topics.AdminCancel,
+		UserCancel:  cfg.Kafka.Topics.UserCancel,
+	})
 	grpcServer := grpcapp.New(cfg.GRPC.Port, bookingService, log)
 
 	return &App{
 		GRPC:           grpcServer,
 		repo:           repo,
 		resourceClient: resourceClient,
+		producer:       producer,
 		log:            log,
 	}, nil
+}
+
+func initProducer(
+	ctx context.Context,
+	cfg *config.Config,
+	log *slog.Logger,
+	repo *repository.Repository,
+	resourceClient *resourcegrpc.Client,
+	op string,
+) (*kafkaproducer.Producer, error) {
+	if !cfg.Kafka.Enabled {
+		return nil, nil
+	}
+
+	producer, err := kafkaproducer.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.ClientID, log)
+	if err != nil {
+		if closeErr := resourceClient.Close(); closeErr != nil {
+			log.Error("failed to close resource client", slog.Any("error", closeErr))
+		}
+		if closeErr := repo.Close(); closeErr != nil {
+			log.Error("failed to close repository", slog.Any("error", closeErr))
+		}
+		return nil, fmt.Errorf("%s: init kafka producer: %w", op, err)
+	}
+
+	log.Info("kafka producer initialized", slog.Any("brokers", cfg.Kafka.Brokers))
+	return producer, nil
 }
 
 func (a *App) MustRun() {
@@ -71,6 +109,8 @@ func (a *App) Run() error {
 }
 
 func (a *App) Stop() error {
+	const op = "App.Stop"
+
 	if a == nil {
 		return nil
 	}
@@ -82,12 +122,17 @@ func (a *App) Stop() error {
 
 	if a.resourceClient != nil {
 		if err := a.resourceClient.Close(); err != nil {
-			return fmt.Errorf("app.Stop: close resource client: %w", err)
+			return fmt.Errorf("%s: close resource client: %w", op, err)
+		}
+	}
+	if a.producer != nil {
+		if err := a.producer.Close(); err != nil {
+			return fmt.Errorf("%s: close kafka producer: %w", op, err)
 		}
 	}
 	if a.repo != nil {
 		if err := a.repo.Close(); err != nil {
-			return fmt.Errorf("app.Stop: close repository: %w", err)
+			return fmt.Errorf("%s: close repository: %w", op, err)
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/events"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/models"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
 )
@@ -16,6 +17,9 @@ const (
 	resourceTypeWorkspace   = "workspace"
 	resourceStatusAvailable = "available"
 	bookingGap              = 15 * time.Minute
+	defaultUserBookingTopic = "topic.user.booking"
+	defaultAdminCancelTopic = "topic.admin.cancel"
+	defaultUserCancelTopic  = "topic.user.cancel"
 )
 
 type Resource struct {
@@ -39,21 +43,45 @@ type ResourceClient interface {
 	GetResource(ctx context.Context, resourceID string) (*Resource, error)
 }
 
+type EventProducer interface {
+	ProduceEvent(ctx context.Context, topic string, key string, msg any) error
+}
+
+type EventTopics struct {
+	UserBooking string
+	AdminCancel string
+	UserCancel  string
+}
+
 type Service struct {
 	log            *slog.Logger
 	repo           Repository
 	resourceClient ResourceClient
+	producer       EventProducer
+	topics         EventTopics
 }
 
-func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient) *Service {
+func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient, producer EventProducer, topics EventTopics) *Service {
 	if log == nil {
 		log = slog.Default()
+	}
+
+	if strings.TrimSpace(topics.UserBooking) == "" {
+		topics.UserBooking = defaultUserBookingTopic
+	}
+	if strings.TrimSpace(topics.AdminCancel) == "" {
+		topics.AdminCancel = defaultAdminCancelTopic
+	}
+	if strings.TrimSpace(topics.UserCancel) == "" {
+		topics.UserCancel = defaultUserCancelTopic
 	}
 
 	return &Service{
 		log:            log,
 		repo:           repo,
 		resourceClient: resourceClient,
+		producer:       producer,
+		topics:         topics,
 	}
 }
 
@@ -116,6 +144,8 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 		slog.String("user_id", created.UserID),
 	)
 
+	s.produceUserBookingEvent(ctx, created)
+
 	return created, nil
 }
 
@@ -140,6 +170,7 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 	}
 
 	s.log.Info("booking canceled by user", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+	s.produceUserCancelEvent(ctx, b)
 
 	return b, nil
 }
@@ -154,6 +185,7 @@ func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*mo
 	}
 
 	s.log.Info("booking canceled by admin", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+	s.produceAdminCancelEvent(ctx, b)
 
 	return b, nil
 }
@@ -187,4 +219,60 @@ func (s *Service) ListBookingsByResource(ctx context.Context, in booking.ListBoo
 func requiresConflictCheck(resourceType string) bool {
 	resourceType = strings.ToLower(resourceType)
 	return resourceType == resourceTypeMeetingRoom || resourceType == resourceTypeWorkspace
+}
+
+func (s *Service) produceUserBookingEvent(ctx context.Context, b *models.Booking) {
+	if s.producer == nil || b == nil {
+		return
+	}
+
+	err := s.producer.ProduceEvent(ctx, s.topics.UserBooking, b.UserID, events.UserBooking{
+		ToUser:    b.UserID,
+		Status:    string(b.Status),
+		StartTime: b.StartsAt,
+		EndTime:   b.EndsAt,
+		Location:  b.ResourceLocation,
+		Type:      b.ResourceType,
+		Name:      b.ResourceName,
+	})
+	if err != nil {
+		s.log.Warn("publish user book event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
+	}
+}
+
+func (s *Service) produceAdminCancelEvent(ctx context.Context, b *models.Booking) {
+	if s.producer == nil || b == nil {
+		return
+	}
+
+	err := s.producer.ProduceEvent(ctx, s.topics.AdminCancel, b.UserID, events.AdminCancel{
+		ToUser:    b.UserID,
+		Status:    string(b.Status),
+		StartTime: b.StartsAt,
+		EndTime:   b.EndsAt,
+		Location:  b.ResourceLocation,
+		Type:      b.ResourceType,
+		Name:      b.ResourceName,
+	})
+	if err != nil {
+		s.log.Warn("publish admin cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
+	}
+}
+
+func (s *Service) produceUserCancelEvent(ctx context.Context, b *models.Booking) {
+	if s.producer == nil || b == nil {
+		return
+	}
+
+	err := s.producer.ProduceEvent(ctx, s.topics.UserCancel, b.UserID, events.UserCancel{
+		ToUser:    b.UserID,
+		StartTime: b.StartsAt,
+		EndTime:   b.EndsAt,
+		Location:  b.ResourceLocation,
+		Type:      b.ResourceType,
+		Name:      b.ResourceName,
+	})
+	if err != nil {
+		s.log.Warn("publish user cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
+	}
 }
