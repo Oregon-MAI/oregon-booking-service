@@ -1,0 +1,16 @@
+env: "local"
+
+grpc:
+  port: 60017
+
+resource_service:
+  address: "localhost:60008"
+
+
+database:
+  host: "postgres"
+  port: 5438
+  user: "postgres"
+  password: "postgres"
+  name: "booking_service"
+  ssl_mode: "disable"
