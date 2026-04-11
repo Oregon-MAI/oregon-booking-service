@@ -13,6 +13,7 @@ type Config struct {
 	GRPC            GRPC            `yaml:"grpc"`
 	Database        Database        `yaml:"database"`
 	ResourceService ResourceService `yaml:"resource_service"`
+	Kafka           Kafka           `yaml:"kafka"`
 }
 
 type GRPC struct {
@@ -30,6 +31,19 @@ type Database struct {
 
 type ResourceService struct {
 	Address string `yaml:"address" env:"RESOURCE_SERVICE_ADDRESS" env-default:"localhost:60008"`
+}
+
+type Kafka struct {
+	Enabled  bool        `yaml:"enabled" env:"KAFKA_ENABLED" env-default:"false"`
+	Brokers  []string    `yaml:"brokers" env:"KAFKA_BROKERS" env-separator:"," env-default:"localhost:9092"`
+	ClientID string      `yaml:"client_id" env:"KAFKA_CLIENT_ID" env-default:"oregon-booking-service"`
+	Topics   KafkaTopics `yaml:"topics"`
+}
+
+type KafkaTopics struct {
+	UserBooking    string `yaml:"user_booking" env:"KAFKA_TOPIC_USER_BOOKING" env-default:"topic.user.booking"`
+	AdminCancel string `yaml:"admin_cancel" env:"KAFKA_TOPIC_ADMIN_CANCEL" env-default:"topic.admin.cancel"`
+	UserCancel  string `yaml:"user_cancel" env:"KAFKA_TOPIC_USER_CANCEL" env-default:"topic.user.cancel"`
 }
 
 func MustLoad() *Config {
