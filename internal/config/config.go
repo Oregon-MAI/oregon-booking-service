@@ -41,7 +41,7 @@ type Kafka struct {
 }
 
 type KafkaTopics struct {
-	UserBooking    string `yaml:"user_booking" env:"KAFKA_TOPIC_USER_BOOKING" env-default:"topic.user.booking"`
+	UserBooking string `yaml:"user_booking" env:"KAFKA_TOPIC_USER_BOOKING" env-default:"topic.user.booking"`
 	AdminCancel string `yaml:"admin_cancel" env:"KAFKA_TOPIC_ADMIN_CANCEL" env-default:"topic.admin.cancel"`
 	UserCancel  string `yaml:"user_cancel" env:"KAFKA_TOPIC_USER_CANCEL" env-default:"topic.user.cancel"`
 }

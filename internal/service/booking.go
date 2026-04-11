@@ -48,7 +48,7 @@ type EventProducer interface {
 }
 
 type EventTopics struct {
-	UserBooking    string
+	UserBooking string
 	AdminCancel string
 	UserCancel  string
 }
@@ -61,7 +61,7 @@ type Service struct {
 	topics         EventTopics
 }
 
-func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient, publisher EventProducer, topics EventTopics) *Service {
+func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient, producer EventProducer, topics EventTopics) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -80,7 +80,7 @@ func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient
 		log:            log,
 		repo:           repo,
 		resourceClient: resourceClient,
-		producer:      publisher,
+		producer:       producer,
 		topics:         topics,
 	}
 }

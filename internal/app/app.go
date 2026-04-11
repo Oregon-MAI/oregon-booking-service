@@ -42,36 +42,18 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	resourceClient, err := resourcegrpc.NewClient(cfg.ResourceService.Address)
 	if err != nil {
 		if closeErr := repo.Close(); closeErr != nil {
-			return nil, fmt.Errorf("%s: init resource client: %w; close repository: %v", op, err, closeErr)
+			log.Error("failed to close repository", slog.Any("error", closeErr))
 		}
-
 		return nil, fmt.Errorf("%s: init resource client: %w", op, err)
 	}
 
-	var producer *kafkaproducer.Producer
-	if cfg.Kafka.Enabled {
-		producer, err = kafkaproducer.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.ClientID, log)
-		if err != nil {
-			if closeResourceErr := resourceClient.Close(); closeResourceErr != nil {
-				if closeRepositoryErr := repo.Close(); closeRepositoryErr != nil {
-					return nil, fmt.Errorf("%s: init kafka producer: %w; close resource client: %v; close repository: %v", op, err, closeResourceErr, closeRepositoryErr)
-				}
-
-				return nil, fmt.Errorf("%s: init kafka producer: %w; close resource client: %v", op, err, closeResourceErr)
-			}
-
-			if closeRepositoryErr := repo.Close(); closeRepositoryErr != nil {
-				return nil, fmt.Errorf("%s: init kafka producer: %w; close repository: %v", op, err, closeRepositoryErr)
-			}
-
-			return nil, fmt.Errorf("%s: init kafka producer: %w", op, err)
-		}
-
-		log.Info("kafka producer initialized", slog.Any("brokers", cfg.Kafka.Brokers))
+	producer, err := initProducer(ctx, cfg, log, repo, resourceClient, op)
+	if err != nil {
+		return nil, err
 	}
 
 	bookingService := service.NewService(log, repo, resourceClient, producer, service.EventTopics{
-		UserBooking:    cfg.Kafka.Topics.UserBooking,
+		UserBooking: cfg.Kafka.Topics.UserBooking,
 		AdminCancel: cfg.Kafka.Topics.AdminCancel,
 		UserCancel:  cfg.Kafka.Topics.UserCancel,
 	})
@@ -84,6 +66,33 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		producer:       producer,
 		log:            log,
 	}, nil
+}
+
+func initProducer(
+	ctx context.Context,
+	cfg *config.Config,
+	log *slog.Logger,
+	repo *repository.Repository,
+	resourceClient *resourcegrpc.Client,
+	op string,
+) (*kafkaproducer.Producer, error) {
+	if !cfg.Kafka.Enabled {
+		return nil, nil
+	}
+
+	producer, err := kafkaproducer.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.ClientID, log)
+	if err != nil {
+		if closeErr := resourceClient.Close(); closeErr != nil {
+			log.Error("failed to close resource client", slog.Any("error", closeErr))
+		}
+		if closeErr := repo.Close(); closeErr != nil {
+			log.Error("failed to close repository", slog.Any("error", closeErr))
+		}
+		return nil, fmt.Errorf("%s: init kafka producer: %w", op, err)
+	}
+
+	log.Info("kafka producer initialized", slog.Any("brokers", cfg.Kafka.Brokers))
+	return producer, nil
 }
 
 func (a *App) MustRun() {
