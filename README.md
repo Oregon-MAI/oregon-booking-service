@@ -1,14 +1,22 @@
-# oregon-go-template
+# Oregon Booking Service
 
-# Ci
+Микросервис для создания и управления бронированиями ресурсов
 
-Работает все при пуши в main, откртом PR в main или высталегиня тега версии(v*)
+## Быстрый старт
 
-## Linters
+Запуск :
 
-Минимальные требования к код стайлу, в основном упор идет в производительность и анализ поддреживаемости.
-Использкеться golangci-lint(в данном случае его actoins).
-Он будет отсавлять коменты в PR во вкладке "File changed"
+```bash
+docker compose up -d
+```
 
-## Docker push
-docker-push - просиходит после коммита в main. Просиходит сборка образа и отпрвка его в ghcr.io. **Обязательное условие этот public repo** инче не сможем все собрать в docker-compose. **Dockerfile ожидаем в /**
+## Список ручек
+
+### `BookingService`
+
+- `CreateBooking`
+- `GetBooking`
+- `UserCancelBooking`
+- `AdminCancelBooking`
+- `ListBookingsByUser`
+- `ListBookingsByResource`
