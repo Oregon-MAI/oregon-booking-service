@@ -12,7 +12,7 @@ import (
 )
 
 type Client struct {
-	api  resourcev1.ResourceBookingServiceClient
+	api  resourcev1.ResourcePublicServiceClient
 	conn *grpc.ClientConn
 }
 
@@ -26,7 +26,7 @@ func NewClient(address string) (*Client, error) {
 	}
 
 	return &Client{
-		api:  resourcev1.NewResourceBookingServiceClient(conn),
+		api:  resourcev1.NewResourcePublicServiceClient(conn),
 		conn: conn,
 	}, nil
 }
@@ -61,6 +61,26 @@ func (c *Client) GetResource(ctx context.Context, resourceID string) (*service.R
 	}, nil
 }
 
+func (c *Client) ChangeResourceStatus(ctx context.Context, resourceID string, status string, reason string) error {
+	const op = "Client.ChangeResourceStatus"
+
+	statusProto, err := domainResourceStatusToProto(status)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	_, err = c.api.ChangeResourceStatus(ctx, &resourcev1.ChangeResourceStatusRequest{
+		ResourceId: resourceID,
+		Status:     statusProto,
+		Reason:     reason,
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
 func protoResourceTypeToDomain(v resourcev1.ResourceType) string {
 	name := strings.TrimPrefix(v.String(), "RESOURCE_TYPE_")
 	return strings.ToLower(name)
@@ -69,4 +89,19 @@ func protoResourceTypeToDomain(v resourcev1.ResourceType) string {
 func protoResourceStatusToDomain(v resourcev1.ResourceStatus) string {
 	name := strings.TrimPrefix(v.String(), "RESOURCE_STATUS_")
 	return strings.ToLower(name)
+}
+
+func domainResourceStatusToProto(status string) (resourcev1.ResourceStatus, error) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "available":
+		return resourcev1.ResourceStatus_RESOURCE_STATUS_AVAILABLE, nil
+	case "occupied":
+		return resourcev1.ResourceStatus_RESOURCE_STATUS_OCCUPIED, nil
+	case "maintenance":
+		return resourcev1.ResourceStatus_RESOURCE_STATUS_MAINTENANCE, nil
+	case "emergency":
+		return resourcev1.ResourceStatus_RESOURCE_STATUS_EMERGENCY, nil
+	default:
+		return resourcev1.ResourceStatus_RESOURCE_STATUS_UNSPECIFIED, fmt.Errorf("unknown resource status: %q", status)
+	}
 }
