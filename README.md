@@ -39,4 +39,16 @@ docker compose up -d
 - `Admin cancel`: `to_user`, `status`, `start_time`, `end_time`, `location`, `type`, `name`
 - `User cancel`: `to_user`, `start_time`, `end_time`, `location`, `type`, `name`
 
+## Тесты
 
+Прогон всех тестов:
+
+```bash
+go test ./...
+```
+
+Покрытие по ключевым пакетам:
+
+```bash
+go test ./internal/service -cover
+```

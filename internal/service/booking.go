@@ -16,6 +16,7 @@ const (
 	resourceTypeMeetingRoom = "meeting_room"
 	resourceTypeWorkspace   = "workspace"
 	resourceStatusAvailable = "available"
+	resourceStatusOccupied  = "occupied"
 	bookingGap              = 15 * time.Minute
 	defaultUserBookingTopic = "topic.user.booking"
 	defaultAdminCancelTopic = "topic.admin.cancel"
@@ -41,6 +42,7 @@ type Repository interface {
 
 type ResourceClient interface {
 	GetResource(ctx context.Context, resourceID string) (*Resource, error)
+	ChangeResourceStatus(ctx context.Context, resourceID string, status string, reason string) error
 }
 
 type EventProducer interface {
@@ -144,6 +146,15 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 		slog.String("user_id", created.UserID),
 	)
 
+	if err = s.resourceClient.ChangeResourceStatus(ctx, created.ResourceID, resourceStatusOccupied, "booking confirmed"); err != nil {
+		s.log.Error("change resource status failed",
+			slog.String("resource_id", created.ResourceID),
+			slog.String("status", resourceStatusOccupied),
+			slog.Any("error", err),
+		)
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
 	s.produceUserBookingEvent(ctx, created)
 
 	return created, nil
@@ -170,6 +181,14 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 	}
 
 	s.log.Info("booking canceled by user", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+	if err = s.resourceClient.ChangeResourceStatus(ctx, b.ResourceID, resourceStatusAvailable, "booking canceled by user"); err != nil {
+		s.log.Error("change resource status failed",
+			slog.String("resource_id", b.ResourceID),
+			slog.String("status", resourceStatusAvailable),
+			slog.Any("error", err),
+		)
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
 	s.produceUserCancelEvent(ctx, b)
 
 	return b, nil
@@ -185,6 +204,14 @@ func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*mo
 	}
 
 	s.log.Info("booking canceled by admin", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+	if err = s.resourceClient.ChangeResourceStatus(ctx, b.ResourceID, resourceStatusAvailable, "booking canceled by admin"); err != nil {
+		s.log.Error("change resource status failed",
+			slog.String("resource_id", b.ResourceID),
+			slog.String("status", resourceStatusAvailable),
+			slog.Any("error", err),
+		)
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
 	s.produceAdminCancelEvent(ctx, b)
 
 	return b, nil
