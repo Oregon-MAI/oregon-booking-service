@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/models"
 	bookingv1 "github.com/Oregon-MAI/oregon-infrastructure/contracts/gen/go/booking"
@@ -83,8 +84,14 @@ func (s *ServerAPI) UserCancelBooking(ctx context.Context, in *bookingv1.UserCan
 
 	canceledBooking, err := s.service.UserCancelBooking(ctx, in.GetBookingId())
 	if err != nil {
-		// TODO : distinguish errors
-		return nil, status.Error(codes.Internal, "failed to cancel booking: "+err.Error())
+		switch {
+		case errors.Is(err, ErrUnauthenticated):
+			return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+		case errors.Is(err, ErrPermissionDenied):
+			return nil, status.Error(codes.PermissionDenied, "permission denied")
+		default:
+			return nil, status.Error(codes.Internal, "failed to cancel booking: "+err.Error())
+		}
 	}
 
 	return &bookingv1.UserCancelBookingResponse{
@@ -99,8 +106,14 @@ func (s *ServerAPI) AdminCancelBooking(ctx context.Context, in *bookingv1.AdminC
 
 	canceledBooking, err := s.service.AdminCancelBooking(ctx, in.GetBookingId())
 	if err != nil {
-		// TODO : distinguish errors
-		return nil, status.Error(codes.Internal, "failed to cancel booking: "+err.Error())
+		switch {
+		case errors.Is(err, ErrUnauthenticated):
+			return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+		case errors.Is(err, ErrPermissionDenied):
+			return nil, status.Error(codes.PermissionDenied, "permission denied")
+		default:
+			return nil, status.Error(codes.Internal, "failed to cancel booking: "+err.Error())
+		}
 	}
 
 	return &bookingv1.AdminCancelBookingResponse{

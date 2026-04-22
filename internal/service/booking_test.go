@@ -14,6 +14,7 @@ import (
 	grpcbooking "github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
 )
 
 type repositoryMock struct{ mock.Mock }
@@ -173,6 +174,13 @@ func newTestService(repo *repositoryMock, rc *resourceClientMock, producer *prod
 	return NewService(slog.New(slog.NewTextHandler(io.Discard, nil)), repo, rc, producer, topics)
 }
 
+func authContext(userID string, roles string) context.Context {
+	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		headerUserID, userID,
+		headerUserRole, roles,
+	))
+}
+
 func sampleBooking() *models.Booking {
 	start := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 	return &models.Booking{
@@ -248,7 +256,7 @@ func TestCreateBooking_ChangeStatusError(t *testing.T) {
 }
 
 func TestUserCancelBooking_Success(t *testing.T) {
-	ctx := context.Background()
+	ctx := authContext("user-1", "user")
 	cancelled := sampleBooking()
 	cancelled.Status = models.BookingStatusCanceled
 
@@ -256,6 +264,7 @@ func TestUserCancelBooking_Success(t *testing.T) {
 	rc := &resourceClientMock{}
 	prod := &producerMock{}
 
+	repo.On("GetBooking", mock.Anything, "booking-1").Return(sampleBooking(), nil).Once()
 	repo.On("CancelBooking", mock.Anything, "booking-1").Return(cancelled, nil).Once()
 	rc.On("ChangeResourceStatus", mock.Anything, "resource-1", "available", "booking canceled by user").Return(nil).Once()
 	prod.On("ProduceEvent", mock.Anything, "topic.user.cancel", "user-1", mock.MatchedBy(func(msg any) bool {
@@ -273,7 +282,7 @@ func TestUserCancelBooking_Success(t *testing.T) {
 }
 
 func TestAdminCancelBooking_StatusChangeError(t *testing.T) {
-	ctx := context.Background()
+	ctx := authContext("admin-1", "admin")
 	wantErr := errors.New("status failed")
 	cancelled := sampleBooking()
 	cancelled.Status = models.BookingStatusCanceled
@@ -525,11 +534,30 @@ func TestCancelBranches(t *testing.T) {
 		rc := &resourceClientMock{}
 		prod := &producerMock{}
 		wantErr := errors.New("cancel failed")
+		repo.On("GetBooking", mock.Anything, "booking-1").Return(sampleBooking(), nil).Once()
 		repo.On("CancelBooking", mock.Anything, "booking-1").Return((*models.Booking)(nil), wantErr).Once()
 
 		svc := newTestService(repo, rc, prod, EventTopics{})
-		_, err := svc.UserCancelBooking(context.Background(), "booking-1")
+		_, err := svc.UserCancelBooking(authContext("user-1", "user"), "booking-1")
 		require.ErrorIs(t, err, wantErr)
+	})
+
+	t.Run("user cancel denied for another user", func(t *testing.T) {
+		repo := &repositoryMock{}
+		rc := &resourceClientMock{}
+		prod := &producerMock{}
+		repo.On("GetBooking", mock.Anything, "booking-1").Return(sampleBooking(), nil).Once()
+
+		svc := newTestService(repo, rc, prod, EventTopics{})
+		_, err := svc.UserCancelBooking(authContext("user-2", "user"), "booking-1")
+		require.ErrorIs(t, err, grpcbooking.ErrPermissionDenied)
+		repo.AssertNotCalled(t, "CancelBooking", mock.Anything, mock.Anything)
+	})
+
+	t.Run("user cancel unauthenticated", func(t *testing.T) {
+		svc := newTestService(&repositoryMock{}, &resourceClientMock{}, &producerMock{}, EventTopics{})
+		_, err := svc.UserCancelBooking(context.Background(), "booking-1")
+		require.ErrorIs(t, err, grpcbooking.ErrUnauthenticated)
 	})
 
 	t.Run("admin cancel success", func(t *testing.T) {
@@ -547,8 +575,19 @@ func TestCancelBranches(t *testing.T) {
 		})).Return(nil).Once()
 
 		svc := newTestService(repo, rc, prod, EventTopics{AdminCancel: "topic.admin.cancel"})
-		_, err := svc.AdminCancelBooking(context.Background(), "booking-1")
+		_, err := svc.AdminCancelBooking(authContext("admin-1", "admin,user"), "booking-1")
 		require.NoError(t, err)
+	})
+
+	t.Run("admin cancel denied for non-admin", func(t *testing.T) {
+		repo := &repositoryMock{}
+		rc := &resourceClientMock{}
+		prod := &producerMock{}
+
+		svc := newTestService(repo, rc, prod, EventTopics{})
+		_, err := svc.AdminCancelBooking(authContext("user-1", "user"), "booking-1")
+		require.ErrorIs(t, err, grpcbooking.ErrPermissionDenied)
+		repo.AssertNotCalled(t, "CancelBooking", mock.Anything, mock.Anything)
 	})
 
 	t.Run("admin cancel repo error", func(t *testing.T) {
@@ -559,7 +598,7 @@ func TestCancelBranches(t *testing.T) {
 		repo.On("CancelBooking", mock.Anything, "booking-1").Return((*models.Booking)(nil), wantErr).Once()
 
 		svc := newTestService(repo, rc, prod, EventTopics{})
-		_, err := svc.AdminCancelBooking(context.Background(), "booking-1")
+		_, err := svc.AdminCancelBooking(authContext("admin-1", "admin"), "booking-1")
 		require.ErrorIs(t, err, wantErr)
 	})
 }

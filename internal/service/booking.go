@@ -10,6 +10,7 @@ import (
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/events"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/models"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -21,7 +22,15 @@ const (
 	defaultUserBookingTopic = "topic.user.booking"
 	defaultAdminCancelTopic = "topic.admin.cancel"
 	defaultUserCancelTopic  = "topic.user.cancel"
+	headerUserID            = "x-user-id"
+	headerUserRole          = "x-user-role"
+	roleAdmin               = "admin"
 )
+
+type authClaims struct {
+	UserID string
+	Roles  map[string]struct{}
+}
 
 type Resource struct {
 	ID       string
@@ -173,6 +182,23 @@ func (s *Service) GetBooking(ctx context.Context, bookingID string) (*models.Boo
 
 func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.UserCancelBooking"
+	claims, err := authFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	targetBooking, err := s.repo.GetBooking(ctx, bookingID)
+	if err != nil {
+		s.log.Error("get booking before user cancel failed", slog.String("booking_id", bookingID), slog.Any("error", err))
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	if targetBooking == nil {
+		return nil, fmt.Errorf("%s: booking not found", op)
+	}
+
+	if !strings.EqualFold(targetBooking.UserID, claims.UserID) {
+		return nil, fmt.Errorf("%s: %w", op, booking.ErrPermissionDenied)
+	}
 
 	b, err := s.repo.CancelBooking(ctx, bookingID)
 	if err != nil {
@@ -196,6 +222,14 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 
 func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.AdminCancelBooking"
+	claims, err := authFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	if !hasRole(claims.Roles, roleAdmin) {
+		return nil, fmt.Errorf("%s: %w", op, booking.ErrPermissionDenied)
+	}
 
 	b, err := s.repo.CancelBooking(ctx, bookingID)
 	if err != nil {
@@ -302,4 +336,52 @@ func (s *Service) produceUserCancelEvent(ctx context.Context, b *models.Booking)
 	if err != nil {
 		s.log.Warn("publish user cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
 	}
+}
+
+func authFromContext(ctx context.Context) (authClaims, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return authClaims{}, booking.ErrUnauthenticated
+	}
+
+	userID := strings.TrimSpace(firstMetadataValue(md, headerUserID))
+	if userID == "" {
+		return authClaims{}, booking.ErrUnauthenticated
+	}
+
+	roles := parseRoles(md.Get(headerUserRole))
+
+	return authClaims{
+		UserID: userID,
+		Roles:  roles,
+	}, nil
+}
+
+func firstMetadataValue(md metadata.MD, key string) string {
+	values := md.Get(key)
+	if len(values) == 0 {
+		return ""
+	}
+
+	return values[0]
+}
+
+func parseRoles(values []string) map[string]struct{} {
+	roles := make(map[string]struct{})
+	for _, raw := range values {
+		for _, role := range strings.Split(raw, ",") {
+			normalized := strings.ToLower(strings.TrimSpace(role))
+			if normalized == "" {
+				continue
+			}
+			roles[normalized] = struct{}{}
+		}
+	}
+
+	return roles
+}
+
+func hasRole(roles map[string]struct{}, role string) bool {
+	_, ok := roles[strings.ToLower(strings.TrimSpace(role))]
+	return ok
 }

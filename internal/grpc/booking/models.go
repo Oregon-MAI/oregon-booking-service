@@ -1,6 +1,14 @@
 package booking
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrUnauthenticated  = errors.New("unauthenticated")
+	ErrPermissionDenied = errors.New("permission denied")
+)
 
 type CreateBookingRequest struct {
 	ResourceID string
