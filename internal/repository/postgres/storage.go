@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	dbStatusConfirmed       = "confirmed"
-	dbStatusCanceled        = "canceled"
+	dbStatusConfirmed = "confirmed"
+	dbStatusCanceled  = "canceled"
+
 	resourceTypeMeetingRoom = "meeting_room"
 	resourceTypeWorkspace   = "workspace"
 )
