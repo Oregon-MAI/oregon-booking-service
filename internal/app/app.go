@@ -42,7 +42,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	resourceClient, err := resourcegrpc.NewClient(cfg.ResourceService.Address)
 	if err != nil {
 		if closeErr := repo.Close(); closeErr != nil {
-			log.Error("failed to close repository", slog.Any("error", closeErr))
+			log.ErrorContext(ctx, "failed to close repository", slog.Any("error", closeErr))
 		}
 		return nil, fmt.Errorf("%s: init resource client: %w", op, err)
 	}
@@ -83,15 +83,15 @@ func initProducer(
 	producer, err := kafkaproducer.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.ClientID, log)
 	if err != nil {
 		if closeErr := resourceClient.Close(); closeErr != nil {
-			log.Error("failed to close resource client", slog.Any("error", closeErr))
+			log.ErrorContext(ctx, "failed to close resource client", slog.Any("error", closeErr))
 		}
 		if closeErr := repo.Close(); closeErr != nil {
-			log.Error("failed to close repository", slog.Any("error", closeErr))
+			log.ErrorContext(ctx, "failed to close repository", slog.Any("error", closeErr))
 		}
 		return nil, fmt.Errorf("%s: init kafka producer: %w", op, err)
 	}
 
-	log.Info("kafka producer initialized", slog.Any("brokers", cfg.Kafka.Brokers))
+	log.InfoContext(ctx, "kafka producer initialized", slog.Any("brokers", cfg.Kafka.Brokers))
 	return producer, nil
 }
 
@@ -104,20 +104,20 @@ func (a *App) Run() error {
 		return errors.New("app.Run: app is not initialized")
 	}
 
-	a.log.Info("starting grpc app")
+	a.log.InfoContext(context.Background(), "starting grpc app")
 	return a.GRPC.Run()
 }
 
-func (a *App) Stop() error {
+func (a *App) Stop(ctx context.Context) error {
 	const op = "App.Stop"
 
 	if a == nil {
 		return nil
 	}
 
-	a.log.Info("stopping grpc app")
+	a.log.InfoContext(ctx, "stopping grpc app")
 	if a.GRPC != nil {
-		a.GRPC.Stop()
+		a.GRPC.Stop(ctx)
 	}
 
 	if a.resourceClient != nil {
@@ -127,7 +127,9 @@ func (a *App) Stop() error {
 	}
 	if a.producer != nil {
 		if err := a.producer.Close(); err != nil {
-			return fmt.Errorf("%s: close kafka producer: %w", op, err)
+			a.log.ErrorContext(ctx, "app.Stop: close producer failed", slog.Any("error", err))
+		} else {
+			a.log.InfoContext(ctx, "kafka producer closed")
 		}
 	}
 	if a.repo != nil {
@@ -136,7 +138,7 @@ func (a *App) Stop() error {
 		}
 	}
 
-	a.log.Info("application stopped")
+	a.log.InfoContext(ctx, "application stopped")
 
 	return nil
 }

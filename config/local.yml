@@ -6,6 +6,11 @@ grpc:
 resource_service:
   address: "localhost:60009"
 
+tracer:
+  end-point: "localhost:4318"
+  insecure: true
+  sample-ratio: 1.0
+
 kafka:
   enabled: false
   brokers:

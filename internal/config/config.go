@@ -13,6 +13,7 @@ type Config struct {
 	GRPC            GRPC            `yaml:"grpc"`
 	Database        Database        `yaml:"database"`
 	ResourceService ResourceService `yaml:"resource_service"`
+	Tracer          Tracer          `yaml:"tracer"`
 	Kafka           Kafka           `yaml:"kafka"`
 }
 
@@ -31,6 +32,12 @@ type Database struct {
 
 type ResourceService struct {
 	Address string `yaml:"address" env:"RESOURCE_SERVICE_ADDRESS" env-default:"localhost:60008"`
+}
+
+type Tracer struct {
+	EndPoint    string  `yaml:"end-point" env:"END_POINT"`
+	Insecure    bool    `yaml:"insecure" env:"INSECURE"`
+	SampleRatio float64 `yaml:"sample-ratio" env:"SAMPLE_RATION"`
 }
 
 type Kafka struct {

@@ -7,6 +7,7 @@ import (
 	"net"
 
 	bookinghandler "github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
@@ -25,10 +26,13 @@ func New(port int, bookingService bookinghandler.BookingService, log *slog.Logge
 		log = slog.Default()
 	}
 
-	server := grpc.NewServer(grpc.ChainUnaryInterceptor(
-		rpcLoggingUnaryInterceptor(log),
-		recoveryUnaryInterceptor(log),
-	))
+	server := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.ChainUnaryInterceptor(
+			rpcLoggingUnaryInterceptor(log),
+			recoveryUnaryInterceptor(log),
+		),
+	)
 
 	reflection.Register(server)
 	bookinghandler.NewServer(server, bookingService)
@@ -55,23 +59,23 @@ func (a *App) Run() error {
 	}
 	a.listener = listener
 
-	a.log.Info("grpc listener started", slog.String("addr", listener.Addr().String()))
+	a.log.InfoContext(context.Background(), "grpc listener started", slog.String("addr", listener.Addr().String()))
 
 	err = a.server.Serve(listener)
 	if err == nil || err == grpc.ErrServerStopped {
-		a.log.Info("grpc server stopped")
+		a.log.InfoContext(context.Background(), "grpc server stopped")
 		return nil
 	}
 
 	return fmt.Errorf("%s: serve: %w", op, err)
 }
 
-func (a *App) Stop() {
+func (a *App) Stop(ctx context.Context) {
 	if a == nil || a.server == nil {
 		return
 	}
 
-	a.log.Info("stopping grpc server")
+	a.log.InfoContext(ctx, "stopping grpc server")
 	a.server.GracefulStop()
 }
 
@@ -84,7 +88,7 @@ func recoveryUnaryInterceptor(log *slog.Logger) grpc.UnaryServerInterceptor {
 	) (resp any, err error) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				log.Error("panic recovered in grpc handler", slog.String("method", info.FullMethod), slog.Any("panic", recovered))
+				log.ErrorContext(ctx, "panic recovered in grpc handler", slog.String("method", info.FullMethod), slog.Any("panic", recovered))
 				err = status.Error(codes.Internal, "internal error")
 			}
 		}()
@@ -102,7 +106,7 @@ func rpcLoggingUnaryInterceptor(log *slog.Logger) grpc.UnaryServerInterceptor {
 	) (any, error) {
 		resp, err := handler(ctx, req)
 		if err != nil {
-			log.Warn(
+			log.WarnContext(ctx,
 				"grpc request failed",
 				slog.String("method", info.FullMethod),
 				slog.String("grpc_code", status.Code(err).String()),

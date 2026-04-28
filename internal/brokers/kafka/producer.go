@@ -77,7 +77,7 @@ func (p *Producer) ProduceEvent(ctx context.Context, topic string, key string, m
 		return fmt.Errorf("%s: send message: %w", op, err)
 	}
 
-	p.log.Debug("kafka event published",
+	p.log.DebugContext(ctx, "kafka event published",
 		slog.String("topic", topic),
 		slog.String("key", key),
 		slog.Int("partition", int(partition)),

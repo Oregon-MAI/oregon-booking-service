@@ -35,14 +35,14 @@ func New(ctx context.Context, dsn string, log *slog.Logger) (*Repository, error)
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		log.Error("postgres open failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "postgres open failed", slog.Any("error", err))
 		return nil, fmt.Errorf("repository.New: %w", err)
 	}
 
 	if err = db.PingContext(ctx); err != nil {
-		log.Error("postgres ping failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "postgres ping failed", slog.Any("error", err))
 		if closeErr := db.Close(); closeErr != nil {
-			log.Error("postgres close after ping failed", slog.Any("error", closeErr))
+			log.ErrorContext(ctx, "postgres close after ping failed", slog.Any("error", closeErr))
 			return nil, fmt.Errorf("repository.New: ping db: %w; close db: %v", err, closeErr)
 		}
 
@@ -116,7 +116,7 @@ func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking)
 		&created.UpdatedAt,
 	)
 	if err != nil {
-		r.log.Error("create booking insert failed", slog.Any("error", err))
+		r.log.ErrorContext(ctx, "create booking insert failed", slog.Any("error", err))
 		return nil, fmt.Errorf("%s: insert booking: %w", op, err)
 	}
 
@@ -170,7 +170,7 @@ func (r *Repository) ListBookingsByUser(ctx context.Context, userID string) ([]*
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			r.log.Error("rows close failed", slog.String("op", op), slog.Any("error", closeErr))
+			r.log.ErrorContext(ctx, "rows close failed", slog.String("op", op), slog.Any("error", closeErr))
 		}
 	}()
 
@@ -210,7 +210,7 @@ func (r *Repository) ListBookingsByResource(ctx context.Context, resourceID stri
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			r.log.Error("rows close failed", slog.String("op", op), slog.Any("error", closeErr))
+			r.log.ErrorContext(ctx, "rows close failed", slog.String("op", op), slog.Any("error", closeErr))
 		}
 	}()
 

@@ -111,8 +111,8 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 
 	resource, err := s.resourceClient.GetResource(ctx, in.ResourceID)
 	if err != nil {
-		s.log.Error("get resource failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
-		return nil, fmt.Errorf("%s: %w", op, err)
+		s.log.ErrorContext(ctx, "get resource failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
+		return nil, fmt.Errorf("%s: get resource: %w", op, err)
 	}
 
 	if !strings.EqualFold(resource.Status, resourceStatusAvailable) {
@@ -122,7 +122,7 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 	if requiresConflictCheck(resource.Type) {
 		conflict, err := s.repo.HasBookingConflict(ctx, in.UserID, in.StartsAt, in.EndsAt, bookingGap)
 		if err != nil {
-			s.log.Error("conflict check failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
+			s.log.ErrorContext(ctx, "conflict check failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
 			return nil, fmt.Errorf("%s: %w", op, err)
 		}
 		if conflict {
@@ -143,7 +143,7 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 
 	created, err := s.repo.CreateBooking(ctx, b)
 	if err != nil {
-		s.log.Error("create booking failed",
+		s.log.ErrorContext(ctx, "create booking failed",
 			slog.String("resource_id", in.ResourceID),
 			slog.String("user_id", in.UserID),
 			slog.Any("error", err),
@@ -151,7 +151,7 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	s.log.Info("booking created",
+	s.log.InfoContext(ctx, "booking created",
 		slog.String("booking_id", created.BookingID),
 		slog.String("resource_id", created.ResourceID),
 		slog.String("user_id", created.UserID),
@@ -182,7 +182,7 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 
 	targetBooking, err := s.repo.GetBooking(ctx, bookingID)
 	if err != nil {
-		s.log.Error("get booking before user cancel failed", slog.String("booking_id", bookingID), slog.Any("error", err))
+		s.log.ErrorContext(ctx, "get booking before user cancel failed", slog.String("booking_id", bookingID), slog.Any("error", err))
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	if targetBooking == nil {
@@ -195,11 +195,11 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 
 	b, err := s.repo.CancelBooking(ctx, bookingID)
 	if err != nil {
-		s.log.Error("user cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
-		return nil, fmt.Errorf("%s: %w", op, err)
+		s.log.ErrorContext(ctx, "user cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
+		return nil, fmt.Errorf("%s: db call: %w", op, err)
 	}
 
-	s.log.Info("booking canceled by user", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+	s.log.InfoContext(ctx, "booking canceled by user", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
 	s.produceUserCancelEvent(ctx, b)
 
 	return b, nil
@@ -218,11 +218,11 @@ func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*mo
 
 	b, err := s.repo.CancelBooking(ctx, bookingID)
 	if err != nil {
-		s.log.Error("admin cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
+		s.log.ErrorContext(ctx, "admin cancel booking failed", slog.String("booking_id", bookingID), slog.Any("error", err))
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	s.log.Info("booking canceled by admin", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
+	s.log.InfoContext(ctx, "booking canceled by admin", slog.String("booking_id", b.BookingID), slog.String("user_id", b.UserID))
 	s.produceAdminCancelEvent(ctx, b)
 
 	return b, nil
@@ -274,7 +274,7 @@ func (s *Service) produceUserBookingEvent(ctx context.Context, b *models.Booking
 		Name:      b.ResourceName,
 	})
 	if err != nil {
-		s.log.Warn("publish user book event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
+		s.log.WarnContext(ctx, "publish user book event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
 	}
 }
 
@@ -293,7 +293,7 @@ func (s *Service) produceAdminCancelEvent(ctx context.Context, b *models.Booking
 		Name:      b.ResourceName,
 	})
 	if err != nil {
-		s.log.Warn("publish admin cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
+		s.log.WarnContext(ctx, "publish admin cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
 	}
 }
 
@@ -311,7 +311,7 @@ func (s *Service) produceUserCancelEvent(ctx context.Context, b *models.Booking)
 		Name:      b.ResourceName,
 	})
 	if err != nil {
-		s.log.Warn("publish user cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
+		s.log.WarnContext(ctx, "publish user cancel event failed", slog.String("booking_id", b.BookingID), slog.Any("error", err))
 	}
 }
 
