@@ -7,11 +7,14 @@ import (
 	"log/slog"
 
 	"github.com/IBM/sarama"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Producer struct {
 	syncProducer sarama.SyncProducer
 	log          *slog.Logger
+	tracer       trace.Tracer
 }
 
 func NewProducer(brokers []string, clientID string, log *slog.Logger) (*Producer, error) {
@@ -40,7 +43,11 @@ func NewProducer(brokers []string, clientID string, log *slog.Logger) (*Producer
 		return nil, fmt.Errorf("%s: create sync producer: %w", op, err)
 	}
 
-	return &Producer{syncProducer: syncProducer, log: log}, nil
+	return &Producer{
+		syncProducer: syncProducer,
+		log:          log,
+		tracer:       otel.GetTracerProvider().Tracer("kafka/producer"),
+	}, nil
 }
 
 func (p *Producer) ProduceEvent(ctx context.Context, topic string, key string, msg any) error {
@@ -49,6 +56,10 @@ func (p *Producer) ProduceEvent(ctx context.Context, topic string, key string, m
 	if p == nil || p.syncProducer == nil {
 		return fmt.Errorf("%s: producer is not initialized", op)
 	}
+
+	ctx, span := p.tracer.Start(ctx, "Kafka.ProduceEvent")
+	defer span.End()
+
 	if topic == "" {
 		return fmt.Errorf("%s: topic is required", op)
 	}

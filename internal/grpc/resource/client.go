@@ -7,13 +7,16 @@ import (
 
 	"github.com/Oregon-MAI/oregon-booking-service/internal/service"
 	resourcev1 "github.com/Oregon-MAI/oregon-infrastructure/contracts/gen/go/resource"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Client struct {
-	api  resourcev1.ResourcePublicServiceClient
-	conn *grpc.ClientConn
+	api    resourcev1.ResourcePublicServiceClient
+	conn   *grpc.ClientConn
+	tracer trace.Tracer
 }
 
 func NewClient(address string) (*Client, error) {
@@ -26,8 +29,9 @@ func NewClient(address string) (*Client, error) {
 	}
 
 	return &Client{
-		api:  resourcev1.NewResourcePublicServiceClient(conn),
-		conn: conn,
+		api:    resourcev1.NewResourcePublicServiceClient(conn),
+		conn:   conn,
+		tracer: otel.GetTracerProvider().Tracer("resource/client"),
 	}, nil
 }
 
@@ -41,6 +45,9 @@ func (c *Client) Close() error {
 
 func (c *Client) GetResource(ctx context.Context, resourceID string) (*service.Resource, error) {
 	const op = "Client.GetResource"
+
+	ctx, span := c.tracer.Start(ctx, "Client.ResourceService.GetResource")
+	defer span.End()
 
 	resp, err := c.api.GetResource(ctx, &resourcev1.GetResourceRequest{ResourceId: resourceID})
 	if err != nil {
@@ -63,6 +70,9 @@ func (c *Client) GetResource(ctx context.Context, resourceID string) (*service.R
 
 func (c *Client) ChangeResourceStatus(ctx context.Context, resourceID string, status string, reason string) error {
 	const op = "Client.ChangeResourceStatus"
+
+	ctx, span := c.tracer.Start(ctx, "Client.ResourceService.ChangeResourceStatus")
+	defer span.End()
 
 	statusProto, err := domainResourceStatusToProto(status)
 	if err != nil {

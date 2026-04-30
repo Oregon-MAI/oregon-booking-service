@@ -10,6 +10,8 @@ import (
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/events"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/models"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -64,6 +66,7 @@ type EventTopics struct {
 
 type Service struct {
 	log            *slog.Logger
+	tracer         trace.Tracer
 	repo           Repository
 	resourceClient ResourceClient
 	producer       EventProducer
@@ -87,6 +90,7 @@ func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient
 
 	return &Service{
 		log:            log,
+		tracer:         otel.GetTracerProvider().Tracer("booking/service"),
 		repo:           repo,
 		resourceClient: resourceClient,
 		producer:       producer,
@@ -96,6 +100,9 @@ func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient
 
 func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingRequest) (*models.Booking, error) {
 	const op = "Service.CreateBooking"
+
+	ctx, span := s.tracer.Start(ctx, op)
+	defer span.End()
 
 	if in.StartsAt.IsZero() || in.EndsAt.IsZero() || !in.StartsAt.Before(in.EndsAt) {
 		return nil, fmt.Errorf("%s: invalid booking time range", op)
@@ -165,6 +172,9 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 func (s *Service) GetBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.GetBooking"
 
+	ctx, span := s.tracer.Start(ctx, op)
+	defer span.End()
+
 	b, err := s.repo.GetBooking(ctx, bookingID)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -175,6 +185,10 @@ func (s *Service) GetBooking(ctx context.Context, bookingID string) (*models.Boo
 
 func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.UserCancelBooking"
+
+	ctx, span := s.tracer.Start(ctx, op)
+	defer span.End()
+
 	claims, err := authFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -207,6 +221,10 @@ func (s *Service) UserCancelBooking(ctx context.Context, bookingID string) (*mod
 
 func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Service.AdminCancelBooking"
+
+	ctx, span := s.tracer.Start(ctx, op)
+	defer span.End()
+
 	claims, err := authFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -231,6 +249,9 @@ func (s *Service) AdminCancelBooking(ctx context.Context, bookingID string) (*mo
 func (s *Service) ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error) {
 	const op = "Service.ListBookingsByUser"
 
+	ctx, span := s.tracer.Start(ctx, op)
+	defer span.End()
+
 	bookings, err := s.repo.ListBookingsByUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -241,6 +262,9 @@ func (s *Service) ListBookingsByUser(ctx context.Context, userID string) ([]*mod
 
 func (s *Service) ListBookingsByResource(ctx context.Context, in booking.ListBookingsByResourceRequest) ([]*models.Booking, error) {
 	const op = "Service.ListBookingsByResource"
+
+	ctx, span := s.tracer.Start(ctx, op)
+	defer span.End()
 
 	if in.From.IsZero() || in.To.IsZero() || !in.From.Before(in.To) {
 		return nil, fmt.Errorf("%s: invalid time range", op)

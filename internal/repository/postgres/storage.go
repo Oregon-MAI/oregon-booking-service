@@ -11,6 +11,8 @@ import (
 
 	"github.com/Oregon-MAI/oregon-booking-service/internal/domain/models"
 	_ "github.com/lib/pq"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -24,8 +26,9 @@ const (
 var ErrBookingNotFound = errors.New("booking not found")
 
 type Repository struct {
-	db  *sql.DB
-	log *slog.Logger
+	db     *sql.DB
+	log    *slog.Logger
+	tracer trace.Tracer
 }
 
 func New(ctx context.Context, dsn string, log *slog.Logger) (*Repository, error) {
@@ -49,7 +52,11 @@ func New(ctx context.Context, dsn string, log *slog.Logger) (*Repository, error)
 		return nil, fmt.Errorf("repository.New: %w", err)
 	}
 
-	return &Repository{db: db, log: log}, nil
+	return &Repository{
+		db:     db,
+		log:    log,
+		tracer: otel.GetTracerProvider().Tracer("booking/repository"),
+	}, nil
 }
 
 func (r *Repository) Close() error {
@@ -63,6 +70,9 @@ func (r *Repository) Close() error {
 
 func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error) {
 	const op = "Repository.CreateBooking"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
 
 	if booking == nil {
 		return nil, fmt.Errorf("%s: booking is nil", op)
@@ -127,6 +137,9 @@ func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking)
 func (r *Repository) GetBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Repository.GetBooking"
 
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
+
 	booking, err := r.getBookingByID(ctx, bookingID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -141,11 +154,18 @@ func (r *Repository) GetBooking(ctx context.Context, bookingID string) (*models.
 
 func (r *Repository) CancelBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
 	const op = "Repository.CancelBooking"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
+
 	return r.cancelBooking(ctx, bookingID, "booking canceled", op)
 }
 
 func (r *Repository) ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error) {
 	const op = "Repository.ListBookingsByUser"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
@@ -184,6 +204,9 @@ func (r *Repository) ListBookingsByUser(ctx context.Context, userID string) ([]*
 
 func (r *Repository) ListBookingsByResource(ctx context.Context, resourceID string, from time.Time, to time.Time) ([]*models.Booking, error) {
 	const op = "Repository.ListBookingsByResource"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
@@ -224,6 +247,9 @@ func (r *Repository) ListBookingsByResource(ctx context.Context, resourceID stri
 
 func (r *Repository) HasBookingConflict(ctx context.Context, userID string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error) {
 	const op = "Repository.HasBookingConflict"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
 
 	checkStart := startsAt.Add(-gap)
 	checkEnd := endsAt.Add(gap)
