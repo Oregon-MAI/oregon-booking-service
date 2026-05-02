@@ -30,3 +30,12 @@ type UserCancel struct {
 	Type      string    `json:"type"`
 	Name      string    `json:"name"`
 }
+
+type BookingReminder struct {
+	ToUser    string    `json:"to_user"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Location  string    `json:"location"`
+	Type      string    `json:"type"`
+	Name      string    `json:"name"`
+}

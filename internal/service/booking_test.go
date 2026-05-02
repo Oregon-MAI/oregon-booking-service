@@ -19,8 +19,8 @@ import (
 
 type repositoryMock struct{ mock.Mock }
 
-func (m *repositoryMock) CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error) {
-	args := m.Called(ctx, booking)
+func (m *repositoryMock) CreateBooking(ctx context.Context, booking *models.Booking, outbox []*models.OutboxMessage) (*models.Booking, error) {
+	args := m.Called(ctx, booking, outbox)
 	errVal := args.Get(1)
 	var retErr error
 	if errVal != nil {
@@ -201,6 +201,8 @@ func TestNewService_DefaultTopics(t *testing.T) {
 	require.Equal(t, defaultUserBookingTopic, svc.topics.UserBooking)
 	require.Equal(t, defaultAdminCancelTopic, svc.topics.AdminCancel)
 	require.Equal(t, defaultUserCancelTopic, svc.topics.UserCancel)
+	require.Equal(t, defaultRemindStartTopic, svc.topics.RemindStart)
+	require.Equal(t, defaultRemindEndTopic, svc.topics.RemindEnd)
 }
 
 func TestCreateBooking_Success(t *testing.T) {
@@ -212,11 +214,23 @@ func TestCreateBooking_Success(t *testing.T) {
 	repo := &repositoryMock{}
 	rc := &resourceClientMock{}
 	prod := &producerMock{}
-	topics := EventTopics{UserBooking: "topic.user.book"}
+	topics := EventTopics{
+		UserBooking: "topic.user.book",
+		RemindStart: "topic.messages.start",
+		RemindEnd:   "topic.messages.end",
+	}
 
 	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Name: "Room A", Type: "meeting_room", Location: "floor-3", Status: "available"}, nil).Once()
 	repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, nil).Once()
-	repo.On("CreateBooking", mock.Anything, mock.Anything).Return(sampleBooking(), nil).Once()
+	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.MatchedBy(func(outbox []*models.OutboxMessage) bool {
+		if len(outbox) != 2 {
+			return false
+		}
+		topics := map[string]struct{}{outbox[0].Topic: {}, outbox[1].Topic: {}}
+		_, hasStart := topics["topic.messages.start"]
+		_, hasEnd := topics["topic.messages.end"]
+		return hasStart && hasEnd
+	})).Return(sampleBooking(), nil).Once()
 	prod.On("ProduceEvent", mock.Anything, "topic.user.book", "user-1", mock.MatchedBy(func(msg any) bool {
 		_, ok := msg.(events.UserBooking)
 		return ok
@@ -226,6 +240,32 @@ func TestCreateBooking_Success(t *testing.T) {
 	out, err := svc.CreateBooking(ctx, in)
 	require.NoError(t, err)
 	require.Equal(t, "booking-1", out.BookingID)
+
+	repo.AssertExpectations(t)
+	rc.AssertExpectations(t)
+	prod.AssertExpectations(t)
+}
+
+func TestCreateBooking_ReminderSkippedWhenTooSoon(t *testing.T) {
+	ctx := context.Background()
+	start := time.Now().UTC().Add(10 * time.Minute)
+	end := start.Add(30 * time.Minute)
+	in := grpcbooking.CreateBookingRequest{ResourceID: "resource-1", UserID: "user-1", StartsAt: start, EndsAt: end}
+
+	repo := &repositoryMock{}
+	rc := &resourceClientMock{}
+	prod := &producerMock{}
+
+	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Name: "Room A", Type: "meeting_room", Location: "floor-3", Status: "available"}, nil).Once()
+	repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, nil).Once()
+	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.MatchedBy(func(outbox []*models.OutboxMessage) bool {
+		return len(outbox) == 1 && outbox[0].Topic == defaultRemindEndTopic
+	})).Return(sampleBooking(), nil).Once()
+	prod.On("ProduceEvent", mock.Anything, defaultUserBookingTopic, "user-1", mock.Anything).Return(nil).Once()
+
+	svc := newTestService(repo, rc, prod, EventTopics{})
+	_, err := svc.CreateBooking(ctx, in)
+	require.NoError(t, err)
 
 	repo.AssertExpectations(t)
 	rc.AssertExpectations(t)
@@ -375,7 +415,7 @@ func TestCreateBooking_ConflictBranches(t *testing.T) {
 		svc := newTestService(repo, rc, prod, EventTopics{})
 		_, err := svc.CreateBooking(context.Background(), in)
 		require.Error(t, err)
-		repo.AssertNotCalled(t, "CreateBooking", mock.Anything, mock.Anything)
+		repo.AssertNotCalled(t, "CreateBooking", mock.Anything, mock.Anything, mock.Anything)
 	})
 }
 
@@ -390,7 +430,7 @@ func TestCreateBooking_RepositoryCreateError(t *testing.T) {
 
 	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Type: "meeting_room", Status: "available"}, nil).Once()
 	repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, nil).Once()
-	repo.On("CreateBooking", mock.Anything, mock.Anything).Return((*models.Booking)(nil), wantErr).Once()
+	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.Anything).Return((*models.Booking)(nil), wantErr).Once()
 
 	svc := newTestService(repo, rc, prod, EventTopics{})
 	_, err := svc.CreateBooking(context.Background(), grpcbooking.CreateBookingRequest{
@@ -414,7 +454,7 @@ func TestCreateBooking_DeviceSkipsConflictCheck(t *testing.T) {
 	b.ResourceType = "device"
 
 	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Type: "device", Status: "available"}, nil).Once()
-	repo.On("CreateBooking", mock.Anything, mock.Anything).Return(b, nil).Once()
+	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.Anything).Return(b, nil).Once()
 	prod.On("ProduceEvent", mock.Anything, defaultUserBookingTopic, "user-1", mock.Anything).Return(nil).Once()
 
 	svc := newTestService(repo, rc, prod, EventTopics{})
@@ -448,7 +488,7 @@ func TestCreateBooking_OccupiedStatusRejected(t *testing.T) {
 	})
 	require.Error(t, err)
 	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-	repo.AssertNotCalled(t, "CreateBooking", mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "CreateBooking", mock.Anything, mock.Anything, mock.Anything)
 	prod.AssertNotCalled(t, "ProduceEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 

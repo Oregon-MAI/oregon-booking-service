@@ -68,7 +68,7 @@ func (r *Repository) Close() error {
 	return err
 }
 
-func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error) {
+func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking, outbox []*models.OutboxMessage) (*models.Booking, error) {
 	const op = "Repository.CreateBooking"
 
 	ctx, span := r.tracer.Start(ctx, op)
@@ -78,13 +78,47 @@ func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking)
 		return nil, fmt.Errorf("%s: booking is nil", op)
 	}
 
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: begin tx: %w", op, err)
+	}
+
+	created, err := r.createBookingTransaction(ctx, tx, booking)
+	if err != nil {
+		r.rollbackTransaction(ctx, tx, op)
+		return nil, err
+	}
+
+	if len(outbox) > 0 {
+		for _, msg := range outbox {
+			if msg != nil {
+				msg.BookingID = created.BookingID
+			}
+		}
+		if err := r.insertOutboxBatchTransaction(ctx, tx, outbox); err != nil {
+			r.rollbackTransaction(ctx, tx, op)
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.rollbackTransaction(ctx, tx, op)
+		return nil, fmt.Errorf("%s: commit tx: %w", op, err)
+	}
+
+	return created, nil
+}
+
+func (r *Repository) createBookingTransaction(ctx context.Context, tx *sql.Tx, booking *models.Booking) (*models.Booking, error) {
+	const op = "Repository.createBookingTransaction"
+
 	created := &models.Booking{}
 	status := domainStatusToDB(booking.Status)
 	if status == "" {
 		status = dbStatusConfirmed
 	}
 
-	err := r.db.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		INSERT INTO bookings (
 			resource_id,
 			user_id,
@@ -132,6 +166,155 @@ func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking)
 
 	created.Status = dbStatusToDomain(status)
 	return created, nil
+}
+
+func (r *Repository) insertOutboxBatchTransaction(ctx context.Context, tx *sql.Tx, outboxMessages []*models.OutboxMessage) error {
+	const op = "Repository.insertOutboxBatchTransaction"
+
+	for _, outbox := range outboxMessages {
+		if outbox == nil {
+			continue
+		}
+		if strings.TrimSpace(outbox.Topic) == "" {
+			return fmt.Errorf("%s: outbox topic is empty", op)
+		}
+		if strings.TrimSpace(outbox.BookingID) == "" {
+			return fmt.Errorf("%s: outbox booking_id is empty", op)
+		}
+		if len(outbox.Payload) == 0 {
+			return fmt.Errorf("%s: outbox payload is empty", op)
+		}
+		if outbox.ScheduledAt.IsZero() {
+			return fmt.Errorf("%s: outbox scheduled_at is empty", op)
+		}
+
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO outbox_messages (
+				booking_id,
+				topic,
+				message_key,
+				payload,
+				scheduled_at
+			)
+			VALUES ($1::uuid, $2, $3, $4::jsonb, $5)
+			RETURNING outbox_id::text
+		`, outbox.BookingID, outbox.Topic, nullableString(outbox.Key), outbox.Payload, outbox.ScheduledAt).Scan(&outbox.OutboxID); err != nil {
+			return fmt.Errorf("%s: insert outbox: %w", op, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *Repository) rollbackTransaction(ctx context.Context, tx *sql.Tx, op string) {
+	if tx == nil {
+		return
+	}
+	if err := tx.Rollback(); err != nil {
+		r.log.ErrorContext(ctx, "tx rollback failed", slog.String("op", op), slog.Any("error", err))
+	}
+}
+
+func (r *Repository) ListDueOutbox(ctx context.Context, now time.Time, limit int) ([]*models.OutboxMessage, error) {
+	const op = "Repository.ListDueOutbox"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			outbox_id::text,
+			booking_id::text,
+			topic,
+			COALESCE(message_key, ''),
+			payload,
+			scheduled_at,
+			sent_at,
+			attempts,
+			COALESCE(last_error, '')
+		FROM outbox_messages
+		WHERE sent_at IS NULL
+		  AND scheduled_at <= $1
+		ORDER BY scheduled_at ASC
+		LIMIT $2
+	`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("%s: query outbox: %w", op, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			r.log.ErrorContext(ctx, "rows close failed", slog.String("op", op), slog.Any("error", closeErr))
+		}
+	}()
+
+	var outboxMessages []*models.OutboxMessage
+	for rows.Next() {
+		msg := &models.OutboxMessage{}
+		var payload []byte
+		if err := rows.Scan(
+			&msg.OutboxID,
+			&msg.BookingID,
+			&msg.Topic,
+			&msg.Key,
+			&payload,
+			&msg.ScheduledAt,
+			&msg.SentAt,
+			&msg.Attempts,
+			&msg.LastError,
+		); err != nil {
+			return nil, fmt.Errorf("%s: scan outbox: %w", op, err)
+		}
+		msg.Payload = payload
+		outboxMessages = append(outboxMessages, msg)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s: rows: %w", op, err)
+	}
+
+	return outboxMessages, nil
+}
+
+func (r *Repository) MarkOutboxSent(ctx context.Context, outboxID string) error {
+	const op = "Repository.MarkOutboxSent"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
+
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE outbox_messages
+		SET sent_at = now()
+		WHERE outbox_id = $1::uuid
+	`, outboxID)
+	if err != nil {
+		return fmt.Errorf("%s: update outbox: %w", op, err)
+	}
+
+	return nil
+}
+
+func (r *Repository) RescheduleOutbox(ctx context.Context, outboxID string, nextAttempt time.Time, lastErr string) error {
+	const op = "Repository.RescheduleOutbox"
+
+	ctx, span := r.tracer.Start(ctx, op)
+	defer span.End()
+
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE outbox_messages
+		SET attempts = attempts + 1,
+			last_error = $2,
+			scheduled_at = $3
+		WHERE outbox_id = $1::uuid
+	`, outboxID, nullableString(lastErr), nextAttempt)
+	if err != nil {
+		return fmt.Errorf("%s: update outbox: %w", op, err)
+	}
+
+	return nil
 }
 
 func (r *Repository) GetBooking(ctx context.Context, bookingID string) (*models.Booking, error) {
@@ -277,7 +460,12 @@ func (r *Repository) cancelBooking(ctx context.Context, bookingID string, cancel
 	status := dbStatusCanceled
 	updated := &models.Booking{}
 
-	err := r.db.QueryRowContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: begin tx: %w", op, err)
+	}
+
+	err = tx.QueryRowContext(ctx, `
 		UPDATE bookings
 		SET status = $2::booking_status,
 			cancel_reason = $3,
@@ -312,9 +500,25 @@ func (r *Repository) cancelBooking(ctx context.Context, bookingID string, cancel
 		&updated.UpdatedAt,
 	)
 	if err == nil {
+		if _, delErr := tx.ExecContext(ctx, `
+			DELETE FROM outbox_messages
+			WHERE booking_id = $1::uuid
+			  AND sent_at IS NULL
+		`, bookingID); delErr != nil {
+			r.rollbackTransaction(ctx, tx, op)
+			return nil, fmt.Errorf("%s: delete outbox: %w", op, delErr)
+		}
+
+		if err := tx.Commit(); err != nil {
+			r.rollbackTransaction(ctx, tx, op)
+			return nil, fmt.Errorf("%s: commit tx: %w", op, err)
+		}
+
 		updated.Status = dbStatusToDomain(status)
 		return updated, nil
 	}
+
+	r.rollbackTransaction(ctx, tx, op)
 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%s: update booking: %w", op, err)

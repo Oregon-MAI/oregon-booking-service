@@ -27,17 +27,20 @@ docker compose up -d
 
 Если `kafka.enabled=true` в конфиге, то сервис публикует ивенты:
 
-Три вида топиков:
+Топики:
 
 - `topic.user.booking` при `CreateBooking`
 - `topic.admin.cancel` при `AdminCancelBooking`
 - `topic.user.cancel` при `UserCancelBooking`
+- `topic.messages.start` для напоминаний за 15 минут до начала брони
+- `topic.messages.end` для напоминаний за 15 минут до конца брони
 
 Формат ивентов:
 
 - `User booking`: `to_user`, `status`, `start_time`, `end_time`, `location`, `type`, `name`
 - `Admin cancel`: `to_user`, `status`, `start_time`, `end_time`, `location`, `type`, `name`
 - `User cancel`: `to_user`, `start_time`, `end_time`, `location`, `type`, `name`
+- `Booking reminder`: `to_user`, `start_time`, `end_time`, `location`, `type`, `name`
 
 ## Тесты
 

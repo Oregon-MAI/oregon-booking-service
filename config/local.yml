@@ -20,6 +20,8 @@ kafka:
     user_booking: "topic.user.booking"
     admin_cancel: "topic.admin.cancel"
     user_cancel: "topic.user.cancel"
+    remind_start: "topic.messages.start"
+    remind_end: "topic.messages.end"
 
 
 database:

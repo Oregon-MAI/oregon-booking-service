@@ -10,6 +10,7 @@ import (
 	kafkaproducer "github.com/Oregon-MAI/oregon-booking-service/internal/brokers/kafka"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/config"
 	resourcegrpc "github.com/Oregon-MAI/oregon-booking-service/internal/grpc/resource"
+	"github.com/Oregon-MAI/oregon-booking-service/internal/outbox"
 	repository "github.com/Oregon-MAI/oregon-booking-service/internal/repository/postgres"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/service"
 )
@@ -19,6 +20,9 @@ type App struct {
 	repo           *repository.Repository
 	resourceClient *resourcegrpc.Client
 	producer       *kafkaproducer.Producer
+	outboxWorker   *outbox.Worker
+	outboxCancel   context.CancelFunc
+	outboxDone     chan struct{}
 	log            *slog.Logger
 }
 
@@ -56,14 +60,23 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		UserBooking: cfg.Kafka.Topics.UserBooking,
 		AdminCancel: cfg.Kafka.Topics.AdminCancel,
 		UserCancel:  cfg.Kafka.Topics.UserCancel,
+		RemindStart: cfg.Kafka.Topics.RemindStart,
+		RemindEnd:   cfg.Kafka.Topics.RemindEnd,
 	})
 	grpcServer := grpcapp.New(cfg.GRPC.Port, bookingService, log)
+
+	var outboxWorker *outbox.Worker
+	if cfg.Kafka.Enabled && producer != nil {
+		outboxWorker = outbox.NewWorker(repo, producer, log)
+	}
 
 	return &App{
 		GRPC:           grpcServer,
 		repo:           repo,
 		resourceClient: resourceClient,
 		producer:       producer,
+		outboxWorker:   outboxWorker,
+		outboxDone:     make(chan struct{}),
 		log:            log,
 	}, nil
 }
@@ -104,6 +117,17 @@ func (a *App) Run() error {
 		return errors.New("app.Run: app is not initialized")
 	}
 
+	if a.outboxWorker != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		a.outboxCancel = cancel
+		go func() {
+			defer close(a.outboxDone)
+			if err := a.outboxWorker.Run(ctx); err != nil {
+				a.log.WarnContext(ctx, "outbox worker stopped", slog.Any("error", err))
+			}
+		}()
+	}
+
 	a.log.InfoContext(context.Background(), "starting grpc app")
 	return a.GRPC.Run()
 }
@@ -124,6 +148,10 @@ func (a *App) Stop(ctx context.Context) error {
 		if err := a.resourceClient.Close(); err != nil {
 			return fmt.Errorf("%s: close resource client: %w", op, err)
 		}
+	}
+	if a.outboxCancel != nil {
+		a.outboxCancel()
+		<-a.outboxDone
 	}
 	if a.producer != nil {
 		if err := a.producer.Close(); err != nil {

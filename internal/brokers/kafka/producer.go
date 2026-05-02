@@ -70,7 +70,7 @@ func (p *Producer) ProduceEvent(ctx context.Context, topic string, key string, m
 	default:
 	}
 
-	payload, err := json.Marshal(msg)
+	payload, err := marshalPayload(msg)
 	if err != nil {
 		return fmt.Errorf("%s: marshal message to JSON: %w", op, err)
 	}
@@ -96,6 +96,21 @@ func (p *Producer) ProduceEvent(ctx context.Context, topic string, key string, m
 	)
 
 	return nil
+}
+
+func marshalPayload(msg any) ([]byte, error) {
+	if msg == nil {
+		return nil, nil
+	}
+
+	switch v := msg.(type) {
+	case []byte:
+		return v, nil
+	case json.RawMessage:
+		return v, nil
+	default:
+		return json.Marshal(msg)
+	}
 }
 
 func (p *Producer) Close() error {

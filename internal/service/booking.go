@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -23,6 +24,9 @@ const (
 	defaultUserBookingTopic = "topic.user.booking"
 	defaultAdminCancelTopic = "topic.admin.cancel"
 	defaultUserCancelTopic  = "topic.user.cancel"
+	defaultRemindStartTopic = "topic.messages.start"
+	defaultRemindEndTopic   = "topic.messages.end"
+	reminderAdvance         = 15 * time.Minute
 	headerUserID            = "x-user-id"
 	headerUserRole          = "x-user-role"
 	roleAdmin               = "admin"
@@ -42,7 +46,7 @@ type Resource struct {
 }
 
 type Repository interface {
-	CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error)
+	CreateBooking(ctx context.Context, booking *models.Booking, outbox []*models.OutboxMessage) (*models.Booking, error)
 	GetBooking(ctx context.Context, bookingID string) (*models.Booking, error)
 	CancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
 	ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error)
@@ -62,6 +66,8 @@ type EventTopics struct {
 	UserBooking string
 	AdminCancel string
 	UserCancel  string
+	RemindStart string
+	RemindEnd   string
 }
 
 type Service struct {
@@ -86,6 +92,12 @@ func NewService(log *slog.Logger, repo Repository, resourceClient ResourceClient
 	}
 	if strings.TrimSpace(topics.UserCancel) == "" {
 		topics.UserCancel = defaultUserCancelTopic
+	}
+	if strings.TrimSpace(topics.RemindStart) == "" {
+		topics.RemindStart = defaultRemindStartTopic
+	}
+	if strings.TrimSpace(topics.RemindEnd) == "" {
+		topics.RemindEnd = defaultRemindEndTopic
 	}
 
 	return &Service{
@@ -148,7 +160,12 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 		Status:           models.BookingStatusConfirmed,
 	}
 
-	created, err := s.repo.CreateBooking(ctx, b)
+	outboxMessages, err := s.buildReminderOutboxes(b)
+	if err != nil {
+		s.log.WarnContext(ctx, "build reminder outbox failed", slog.Any("error", err))
+	}
+
+	created, err := s.repo.CreateBooking(ctx, b, outboxMessages)
 	if err != nil {
 		s.log.ErrorContext(ctx, "create booking failed",
 			slog.String("resource_id", in.ResourceID),
@@ -167,6 +184,56 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 	s.produceUserBookingEvent(ctx, created)
 
 	return created, nil
+}
+
+func (s *Service) buildReminderOutboxes(b *models.Booking) ([]*models.OutboxMessage, error) {
+	if s == nil || s.producer == nil || b == nil {
+		return nil, nil
+	}
+
+	reminder := events.BookingReminder{
+		ToUser:    b.UserID,
+		StartTime: b.StartsAt,
+		EndTime:   b.EndsAt,
+		Location:  b.ResourceLocation,
+		Type:      b.ResourceType,
+		Name:      b.ResourceName,
+	}
+	payload, err := json.Marshal(reminder)
+	if err != nil {
+		return nil, fmt.Errorf("build reminder payload: %w", err)
+	}
+
+	now := time.Now().UTC()
+	outboxMessages := make([]*models.OutboxMessage, 0, 2)
+
+	startAt := b.StartsAt.Add(-reminderAdvance)
+	if startAt.After(now) {
+		outboxMessages = append(outboxMessages, &models.OutboxMessage{
+			BookingID:   b.BookingID,
+			Topic:       s.topics.RemindStart,
+			Key:         b.UserID,
+			Payload:     payload,
+			ScheduledAt: startAt,
+		})
+	}
+
+	endAt := b.EndsAt.Add(-reminderAdvance)
+	if endAt.After(now) {
+		outboxMessages = append(outboxMessages, &models.OutboxMessage{
+			BookingID:   b.BookingID,
+			Topic:       s.topics.RemindEnd,
+			Key:         b.UserID,
+			Payload:     payload,
+			ScheduledAt: endAt,
+		})
+	}
+
+	if len(outboxMessages) == 0 {
+		return nil, nil
+	}
+
+	return outboxMessages, nil
 }
 
 func (s *Service) GetBooking(ctx context.Context, bookingID string) (*models.Booking, error) {

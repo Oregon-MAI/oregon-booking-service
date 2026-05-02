@@ -40,6 +40,8 @@ services:
         kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic topic.user.booking --replication-factor 1 --partitions 3;
         kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic topic.admin.cancel --replication-factor 1 --partitions 3;
         kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic topic.user.cancel --replication-factor 1 --partitions 3;
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic topic.messages.start --replication-factor 1 --partitions 3;
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic topic.messages.end --replication-factor 1 --partitions 3;
         kafka-topics --bootstrap-server kafka:29092 --list
     restart: "no"
 
@@ -106,7 +108,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: booking_service
-      RESOURCE_SERVICE_ADDRESS: resource-service:60008
+      RESOURCE_SERVICE_ADDRESS: resource-service:60009
       GRPC_PORT: "60017"
       KAFKA_ENABLED: "true"
       KAFKA_BROKERS: kafka:29092
@@ -114,6 +116,8 @@ services:
       KAFKA_TOPIC_USER_BOOK: topic.user.booking
       KAFKA_TOPIC_ADMIN_CANCEL: topic.admin.cancel
       KAFKA_TOPIC_USER_CANCEL: topic.user.cancel
+      KAFKA_TOPIC_REMIND_START: topic.messages.start
+      KAFKA_TOPIC_REMIND_END: topic.messages.end
     depends_on:
       booking-postgres:
         condition: service_healthy

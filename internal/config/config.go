@@ -51,6 +51,8 @@ type KafkaTopics struct {
 	UserBooking string `yaml:"user_booking" env:"KAFKA_TOPIC_USER_BOOKING" env-default:"topic.user.booking"`
 	AdminCancel string `yaml:"admin_cancel" env:"KAFKA_TOPIC_ADMIN_CANCEL" env-default:"topic.admin.cancel"`
 	UserCancel  string `yaml:"user_cancel" env:"KAFKA_TOPIC_USER_CANCEL" env-default:"topic.user.cancel"`
+	RemindStart string `yaml:"remind_start" env:"KAFKA_TOPIC_REMIND_START" env-default:"topic.messages.start"`
+	RemindEnd   string `yaml:"remind_end" env:"KAFKA_TOPIC_REMIND_END" env-default:"topic.messages.end"`
 }
 
 func MustLoad() *Config {
