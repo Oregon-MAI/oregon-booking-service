@@ -17,7 +17,7 @@ import (
 func main() {
 	cfg := config.MustLoad()
 
-	if err := os.MkdirAll("logs", 0o755); err != nil {
+	if err := os.MkdirAll("logs", 0o750); err != nil {
 		panic(err)
 	}
 	logFile, err := os.OpenFile("logs/app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
