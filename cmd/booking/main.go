@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -16,11 +17,24 @@ import (
 func main() {
 	cfg := config.MustLoad()
 
+	if err := os.MkdirAll("logs", 0o755); err != nil {
+		panic(err)
+	}
+	logFile, err := os.OpenFile("logs/app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		if err := logFile.Close(); err != nil {
+			slog.Error("failed to close log file", slog.Any("error", err))
+		}
+	}()
+
 	logCfg := &logger.Config{
 		Level:       slog.LevelInfo,
 		Format:      "json",
 		AddSource:   false,
-		Out:         os.Stdout,
+		Out:         io.MultiWriter(os.Stdout, logFile),
 		ServiceName: "booking-service",
 		Environment: cfg.Env,
 	}

@@ -127,10 +127,11 @@ services:
         condition: service_completed_successfully
     ports:
       - "60017:60017"
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
 
 volumes:
   booking_pgdata:
   resource_pgdata:
-
 
