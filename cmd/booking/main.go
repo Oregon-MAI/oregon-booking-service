@@ -20,7 +20,7 @@ func main() {
 	if err := os.MkdirAll("logs", 0o750); err != nil {
 		panic(err)
 	}
-	logFile, err := os.OpenFile("logs/app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	logFile, err := os.OpenFile("logs/booking.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		panic(err)
 	}

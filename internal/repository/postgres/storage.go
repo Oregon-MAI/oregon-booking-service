@@ -18,9 +18,6 @@ import (
 const (
 	dbStatusConfirmed = "confirmed"
 	dbStatusCanceled  = "canceled"
-
-	resourceTypeMeetingRoom = "meeting_room"
-	resourceTypeWorkspace   = "workspace"
 )
 
 var ErrBookingNotFound = errors.New("booking not found")
@@ -428,11 +425,16 @@ func (r *Repository) ListBookingsByResource(ctx context.Context, resourceID stri
 	return bookings, nil
 }
 
-func (r *Repository) HasBookingConflict(ctx context.Context, userID string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error) {
+func (r *Repository) HasBookingConflict(ctx context.Context, userID string, resourceType string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error) {
 	const op = "Repository.HasBookingConflict"
 
 	ctx, span := r.tracer.Start(ctx, op)
 	defer span.End()
+
+	resourceType = strings.ToLower(strings.TrimSpace(resourceType))
+	if resourceType == "" {
+		return false, fmt.Errorf("%s: resource type is empty", op)
+	}
 
 	checkStart := startsAt.Add(-gap)
 	checkEnd := endsAt.Add(gap)
@@ -444,11 +446,11 @@ func (r *Repository) HasBookingConflict(ctx context.Context, userID string, star
 			FROM bookings
 			WHERE user_id = $1::uuid
 			  AND status = $2::booking_status
-			  AND resource_type IN ($3, $4)
-			  AND starts_at < $6
-			  AND ends_at > $5
+			  AND resource_type = $3
+			  AND starts_at < $5
+			  AND ends_at > $4
 		)
-	`, userID, dbStatusConfirmed, resourceTypeMeetingRoom, resourceTypeWorkspace, checkStart, checkEnd).Scan(&hasConflict)
+	`, userID, dbStatusConfirmed, resourceType, checkStart, checkEnd).Scan(&hasConflict)
 	if err != nil {
 		return false, fmt.Errorf("%s: check conflict: %w", op, err)
 	}

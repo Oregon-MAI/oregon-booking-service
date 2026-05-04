@@ -51,7 +51,7 @@ type Repository interface {
 	CancelBooking(ctx context.Context, bookingID string) (*models.Booking, error)
 	ListBookingsByUser(ctx context.Context, userID string) ([]*models.Booking, error)
 	ListBookingsByResource(ctx context.Context, resourceID string, from time.Time, to time.Time) ([]*models.Booking, error)
-	HasBookingConflict(ctx context.Context, userID string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error)
+	HasBookingConflict(ctx context.Context, userID string, resourceType string, startsAt time.Time, endsAt time.Time, gap time.Duration) (bool, error)
 }
 
 type ResourceClient interface {
@@ -139,7 +139,7 @@ func (s *Service) CreateBooking(ctx context.Context, in booking.CreateBookingReq
 	}
 
 	if requiresConflictCheck(resource.Type) {
-		conflict, err := s.repo.HasBookingConflict(ctx, in.UserID, in.StartsAt, in.EndsAt, bookingGap)
+		conflict, err := s.repo.HasBookingConflict(ctx, in.UserID, resource.Type, in.StartsAt, in.EndsAt, bookingGap)
 		if err != nil {
 			s.log.ErrorContext(ctx, "conflict check failed", slog.String("resource_id", in.ResourceID), slog.Any("error", err))
 			return nil, fmt.Errorf("%s: %w", op, err)

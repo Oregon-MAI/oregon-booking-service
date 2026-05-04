@@ -1,0 +1,10 @@
+{"time":"2026-05-04T21:07:01.207407727Z","level":"INFO","msg":"kafka producer initialized","service":"booking-service","env":"local","brokers":["kafka:29092"]}
+{"time":"2026-05-04T21:07:01.207981444Z","level":"INFO","msg":"application initialized","service":"booking-service","env":"local"}
+{"time":"2026-05-04T21:07:01.208852757Z","level":"INFO","msg":"starting grpc app","service":"booking-service","env":"local"}
+{"time":"2026-05-04T21:07:01.209087895Z","level":"INFO","msg":"outbox worker started","service":"booking-service","env":"local","trace_id":"067c065c6ebf96b1dfe4f43bee07eccd","span_id":"cdab09b7a63d502c"}
+{"time":"2026-05-04T21:07:01.212684831Z","level":"INFO","msg":"grpc listener started","service":"booking-service","env":"local","addr":"[::]:60017"}
+{"time":"2026-05-04T21:07:44.970680578Z","level":"INFO","msg":"shutdown signal received","service":"booking-service","env":"local"}
+{"time":"2026-05-04T21:07:44.97115428Z","level":"INFO","msg":"stopping grpc app","service":"booking-service","env":"local"}
+{"time":"2026-05-04T21:07:44.971377013Z","level":"INFO","msg":"stopping grpc server","service":"booking-service","env":"local"}
+{"time":"2026-05-04T21:07:44.972108828Z","level":"INFO","msg":"grpc server stopped","service":"booking-service","env":"local"}
+{"time":"2026-05-04T21:07:44.972151318Z","level":"INFO","msg":"outbox worker stopped","service":"booking-service","env":"local","trace_id":"067c065c6ebf96b1dfe4f43bee07eccd","span_id":"cdab09b7a63d502c"}

@@ -129,8 +129,8 @@ func (m *repositoryMock) ListBookingsByResource(ctx context.Context, resourceID 
 	return nil, retErr
 }
 
-func (m *repositoryMock) HasBookingConflict(ctx context.Context, userID string, startsAt, endsAt time.Time, gap time.Duration) (bool, error) {
-	args := m.Called(ctx, userID, startsAt, endsAt, gap)
+func (m *repositoryMock) HasBookingConflict(ctx context.Context, userID string, resourceType string, startsAt, endsAt time.Time, gap time.Duration) (bool, error) {
+	args := m.Called(ctx, userID, resourceType, startsAt, endsAt, gap)
 	return args.Bool(0), args.Error(1)
 }
 
@@ -221,7 +221,7 @@ func TestCreateBooking_Success(t *testing.T) {
 	}
 
 	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Name: "Room A", Type: "meeting_room", Location: "floor-3", Status: "available"}, nil).Once()
-	repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, nil).Once()
+	repo.On("HasBookingConflict", mock.Anything, "user-1", "meeting_room", start, end, bookingGap).Return(false, nil).Once()
 	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.MatchedBy(func(outbox []*models.OutboxMessage) bool {
 		if len(outbox) != 2 {
 			return false
@@ -257,7 +257,7 @@ func TestCreateBooking_ReminderSkippedWhenTooSoon(t *testing.T) {
 	prod := &producerMock{}
 
 	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Name: "Room A", Type: "meeting_room", Location: "floor-3", Status: "available"}, nil).Once()
-	repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, nil).Once()
+	repo.On("HasBookingConflict", mock.Anything, "user-1", "meeting_room", start, end, bookingGap).Return(false, nil).Once()
 	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.MatchedBy(func(outbox []*models.OutboxMessage) bool {
 		return len(outbox) == 1 && outbox[0].Topic == defaultRemindEndTopic
 	})).Return(sampleBooking(), nil).Once()
@@ -381,7 +381,7 @@ func TestCreateBooking_ResourceNotAvailable(t *testing.T) {
 		EndsAt:     start.Add(30 * time.Minute),
 	})
 	require.Error(t, err)
-	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestCreateBooking_ConflictBranches(t *testing.T) {
@@ -397,7 +397,7 @@ func TestCreateBooking_ConflictBranches(t *testing.T) {
 		wantErr := errors.New("conflict check failed")
 
 		rc.On("GetResource", mock.Anything, "resource-1").Return(resource, nil).Once()
-		repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, wantErr).Once()
+		repo.On("HasBookingConflict", mock.Anything, "user-1", "meeting_room", start, end, bookingGap).Return(false, wantErr).Once()
 
 		svc := newTestService(repo, rc, prod, EventTopics{})
 		_, err := svc.CreateBooking(context.Background(), in)
@@ -410,7 +410,7 @@ func TestCreateBooking_ConflictBranches(t *testing.T) {
 		prod := &producerMock{}
 
 		rc.On("GetResource", mock.Anything, "resource-1").Return(resource, nil).Once()
-		repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(true, nil).Once()
+		repo.On("HasBookingConflict", mock.Anything, "user-1", "meeting_room", start, end, bookingGap).Return(true, nil).Once()
 
 		svc := newTestService(repo, rc, prod, EventTopics{})
 		_, err := svc.CreateBooking(context.Background(), in)
@@ -429,7 +429,7 @@ func TestCreateBooking_RepositoryCreateError(t *testing.T) {
 	prod := &producerMock{}
 
 	rc.On("GetResource", mock.Anything, "resource-1").Return(&Resource{ID: "resource-1", Type: "meeting_room", Status: "available"}, nil).Once()
-	repo.On("HasBookingConflict", mock.Anything, "user-1", start, end, bookingGap).Return(false, nil).Once()
+	repo.On("HasBookingConflict", mock.Anything, "user-1", "meeting_room", start, end, bookingGap).Return(false, nil).Once()
 	repo.On("CreateBooking", mock.Anything, mock.Anything, mock.Anything).Return((*models.Booking)(nil), wantErr).Once()
 
 	svc := newTestService(repo, rc, prod, EventTopics{})
@@ -465,7 +465,7 @@ func TestCreateBooking_DeviceSkipsConflictCheck(t *testing.T) {
 		EndsAt:     end,
 	})
 	require.NoError(t, err)
-	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 
 }
 
@@ -487,7 +487,7 @@ func TestCreateBooking_OccupiedStatusRejected(t *testing.T) {
 		EndsAt:     end,
 	})
 	require.Error(t, err)
-	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	repo.AssertNotCalled(t, "HasBookingConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	repo.AssertNotCalled(t, "CreateBooking", mock.Anything, mock.Anything, mock.Anything)
 	prod.AssertNotCalled(t, "ProduceEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
