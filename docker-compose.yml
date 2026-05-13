@@ -118,6 +118,7 @@ services:
       KAFKA_TOPIC_USER_CANCEL: topic.user.cancel
       KAFKA_TOPIC_REMIND_START: topic.messages.start
       KAFKA_TOPIC_REMIND_END: topic.messages.end
+      METRICS_PORT: "9097"
     depends_on:
       booking-postgres:
         condition: service_healthy
@@ -127,6 +128,7 @@ services:
         condition: service_completed_successfully
     ports:
       - "60017:60017"
+      - "9097:9097"
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	grpcapp "github.com/Oregon-MAI/oregon-booking-service/internal/app/grpc"
+	metricsapp "github.com/Oregon-MAI/oregon-booking-service/internal/app/metrics"
 	kafkaproducer "github.com/Oregon-MAI/oregon-booking-service/internal/brokers/kafka"
 	"github.com/Oregon-MAI/oregon-booking-service/internal/config"
 	resourcegrpc "github.com/Oregon-MAI/oregon-booking-service/internal/grpc/resource"
@@ -17,6 +18,7 @@ import (
 
 type App struct {
 	GRPC           *grpcapp.App
+	Metrics        *metricsapp.App
 	repo           *repository.Repository
 	resourceClient *resourcegrpc.Client
 	producer       *kafkaproducer.Producer
@@ -64,6 +66,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 		RemindEnd:   cfg.Kafka.Topics.RemindEnd,
 	})
 	grpcServer := grpcapp.New(cfg.GRPC.Port, bookingService, log)
+	metricsServer := metricsapp.New(cfg.Metrics.Port, log)
 
 	var outboxWorker *outbox.Worker
 	if cfg.Kafka.Enabled && producer != nil {
@@ -72,6 +75,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 
 	return &App{
 		GRPC:           grpcServer,
+		Metrics:        metricsServer,
 		repo:           repo,
 		resourceClient: resourceClient,
 		producer:       producer,
@@ -127,6 +131,13 @@ func (a *App) Run() error {
 			}
 		}()
 	}
+	if a.Metrics != nil {
+		go func() {
+			if err := a.Metrics.Run(); err != nil {
+				a.log.ErrorContext(context.Background(), "metrics server stopped", slog.Any("error", err))
+			}
+		}()
+	}
 
 	a.log.InfoContext(context.Background(), "starting grpc app")
 	return a.GRPC.Run()
@@ -140,35 +151,84 @@ func (a *App) Stop(ctx context.Context) error {
 	}
 
 	a.log.InfoContext(ctx, "stopping grpc app")
-	if a.GRPC != nil {
-		a.GRPC.Stop(ctx)
+	a.stopGRPC(ctx)
+
+	if err := a.closeResourceClient(op); err != nil {
+		return err
 	}
 
-	if a.resourceClient != nil {
-		if err := a.resourceClient.Close(); err != nil {
-			return fmt.Errorf("%s: close resource client: %w", op, err)
-		}
+	a.stopOutbox()
+	a.closeProducer(ctx)
+
+	if err := a.closeRepo(op); err != nil {
+		return err
 	}
-	if a.outboxCancel != nil {
-		a.outboxCancel()
-		<-a.outboxDone
-	}
-	if a.producer != nil {
-		if err := a.producer.Close(); err != nil {
-			a.log.ErrorContext(ctx, "app.Stop: close producer failed", slog.Any("error", err))
-		} else {
-			a.log.InfoContext(ctx, "kafka producer closed")
-		}
-	}
-	if a.repo != nil {
-		if err := a.repo.Close(); err != nil {
-			return fmt.Errorf("%s: close repository: %w", op, err)
-		}
-	}
+
+	a.stopMetrics(ctx)
 
 	a.log.InfoContext(ctx, "application stopped")
 
 	return nil
+}
+
+func (a *App) stopGRPC(ctx context.Context) {
+	if a.GRPC != nil {
+		a.GRPC.Stop(ctx)
+	}
+}
+
+func (a *App) closeResourceClient(op string) error {
+	if a.resourceClient == nil {
+		return nil
+	}
+
+	if err := a.resourceClient.Close(); err != nil {
+		return fmt.Errorf("%s: close resource client: %w", op, err)
+	}
+
+	return nil
+}
+
+func (a *App) stopOutbox() {
+	if a.outboxCancel != nil {
+		a.outboxCancel()
+		<-a.outboxDone
+	}
+}
+
+func (a *App) closeProducer(ctx context.Context) {
+	if a.producer == nil {
+		return
+	}
+
+	if err := a.producer.Close(); err != nil {
+		a.log.ErrorContext(ctx, "app.Stop: close producer failed", slog.Any("error", err))
+		return
+	}
+
+	a.log.InfoContext(ctx, "kafka producer closed")
+}
+
+func (a *App) closeRepo(op string) error {
+	if a.repo == nil {
+		return nil
+	}
+
+	if err := a.repo.Close(); err != nil {
+		return fmt.Errorf("%s: close repository: %w", op, err)
+	}
+
+	return nil
+}
+
+func (a *App) stopMetrics(ctx context.Context) {
+	if a.Metrics == nil {
+		return
+	}
+
+	if err := a.Metrics.Stop(ctx); err != nil {
+		a.log.ErrorContext(ctx, "failed to stop metrics server", slog.Any("error", err))
+	}
 }
 
 func makeDSN(cfg config.Database) string {

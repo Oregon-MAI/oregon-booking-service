@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Env             string          `yaml:"env" env-default:"local"`
 	GRPC            GRPC            `yaml:"grpc"`
+	Metrics         Metrics         `yaml:"metrics"`
 	Database        Database        `yaml:"database"`
 	ResourceService ResourceService `yaml:"resource_service"`
 	Tracer          Tracer          `yaml:"tracer"`
@@ -19,6 +20,10 @@ type Config struct {
 
 type GRPC struct {
 	Port int `yaml:"port" env:"GRPC_PORT" env-default:"60017"`
+}
+
+type Metrics struct {
+	Port int `yaml:"port" env:"METRICS_PORT" env-default:"9097"`
 }
 
 type Database struct {

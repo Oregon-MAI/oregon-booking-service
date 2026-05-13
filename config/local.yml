@@ -3,6 +3,9 @@ env: "local"
 grpc:
   port: 60017
 
+metrics:
+  port: 9097
+
 resource_service:
   address: "localhost:60009"
 

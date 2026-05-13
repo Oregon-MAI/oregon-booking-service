@@ -7,11 +7,14 @@ import (
 	"net"
 
 	bookinghandler "github.com/Oregon-MAI/oregon-booking-service/internal/grpc/booking"
+	"github.com/Oregon-MAI/oregon-booking-service/internal/metrics"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
+
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 )
 
 type App struct {
@@ -29,10 +32,19 @@ func New(port int, bookingService bookinghandler.BookingService, log *slog.Logge
 	server := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
+			grpc_prometheus.UnaryServerInterceptor,
+			inFlightUnaryInterceptor(),
 			rpcLoggingUnaryInterceptor(log),
 			recoveryUnaryInterceptor(log),
 		),
+		grpc.ChainStreamInterceptor(
+			grpc_prometheus.StreamServerInterceptor,
+			inFlightStreamInterceptor(),
+		),
 	)
+
+	grpc_prometheus.EnableHandlingTimeHistogram()
+	grpc_prometheus.Register(server)
 
 	reflection.Register(server)
 	bookinghandler.NewServer(server, bookingService)
@@ -115,5 +127,33 @@ func rpcLoggingUnaryInterceptor(log *slog.Logger) grpc.UnaryServerInterceptor {
 		}
 
 		return resp, err
+	}
+}
+
+func inFlightUnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req any,
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (any, error) {
+		metrics.GrpcInFlight.WithLabelValues(info.FullMethod).Inc()
+		defer metrics.GrpcInFlight.WithLabelValues(info.FullMethod).Dec()
+
+		return handler(ctx, req)
+	}
+}
+
+func inFlightStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(
+		srv any,
+		stream grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		metrics.GrpcInFlight.WithLabelValues(info.FullMethod).Inc()
+		defer metrics.GrpcInFlight.WithLabelValues(info.FullMethod).Dec()
+
+		return handler(srv, stream)
 	}
 }
